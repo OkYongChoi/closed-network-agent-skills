@@ -2,8 +2,8 @@
   "format_version": 1,
   "repository": {
     "url": "https://github.com/OkYongChoi/skills.git",
-    "ref": null,
-    "ref_status": "pending-initial-publish"
+    "ref": "5eeb2a3f0eaa5dc8f3ed4052426bfe9899e5f6ba",
+    "ref_status": "pinned-initial-release"
   },
   "skills": [
     {
@@ -22,7 +22,7 @@
       "name": "skills-installer",
       "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
       "path": "skills/skills-installer",
-      "sha256": "e02f41b26cba3eaa637c76aab17f25822ac4186b1e096a45ff088b9835bffed6"
+      "sha256": "ab1a405f7a95fc58226b5669ec4718f3e345f6c8be2f25017f37065e8d0dec4c"
     }
   ]
 }

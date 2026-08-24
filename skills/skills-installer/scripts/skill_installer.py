@@ -24,9 +24,9 @@ from pathlib import Path, PurePosixPath
 from typing import Iterator
 
 CANONICAL_SOURCE = "https://github.com/OkYongChoi/skills.git"
-# Set to a reviewed full commit SHA in a post-publication release. A repository
-# catalog ref is preferred when this script is run from that repository.
-CANONICAL_REF: str | None = None
+# Reviewed initial release commit. A repository catalog ref is preferred when
+# this script is run from a checkout containing a newer approved catalog.
+CANONICAL_REF: str | None = "5eeb2a3f0eaa5dc8f3ed4052426bfe9899e5f6ba"
 FULL_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ALLOWED_FIELDS = {"name", "description", "license", "compatibility"}

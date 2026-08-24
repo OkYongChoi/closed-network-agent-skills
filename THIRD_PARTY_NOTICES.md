@@ -28,4 +28,3 @@ portable, closed-network operation.
   not a verbatim or complete specification copy.
 
 The complete Apache License 2.0 text is included in `LICENSE`.
-

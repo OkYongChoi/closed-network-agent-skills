@@ -54,9 +54,7 @@ python3 skills/skills-installer/scripts/skill_installer.py install repo-summary 
 Source selection is deterministic: `--source`, then `AGENT_SKILLS_SOURCE`, then
 the current repository checkout, then `https://github.com/OkYongChoi/skills.git`.
 Ref selection is `--ref`, then `AGENT_SKILLS_REF`, then the canonical
-`catalog.json` `repository.ref`/embedded `CANONICAL_REF`. The initial canonical
-fallback requires `--ref` or `AGENT_SKILLS_REF` because this repository cannot
-contain its own first commit SHA before that commit exists.
+`catalog.json` `repository.ref`/embedded `CANONICAL_REF`.
 
 ## Closed-network mirror and bootstrap
 
@@ -96,9 +94,9 @@ python3 scripts/refresh_catalog.py
 python3 -m unittest discover -s tests -v
 ```
 
-The first publisher must replace `repository.ref` and the installer's
-`CANONICAL_REF` with the published full commit SHA in a follow-up release. Runtime installation verifies
-both the checked-out commit (remote sources) and the catalogued tree digest.
+Runtime installation verifies both the checked-out commit (remote sources) and
+the catalogued tree digest. Updating the canonical pin requires an explicit,
+reviewed release change to both `repository.ref` and `CANONICAL_REF`.
 
 Install locks record the local host, process ID, and creation time. A lock is
 recovered only after the configured stale interval when it is a singly linked
