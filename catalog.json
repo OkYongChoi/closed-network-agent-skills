@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "repository": {
+    "url": "https://github.com/OkYongChoi/skills.git",
+    "ref": null,
+    "ref_status": "pending-initial-publish"
+  },
+  "skills": [
+    {
+      "name": "repo-summary",
+      "description": "Summarize a local source repository's structure, likely build and test commands, Git state, and review risks. Use for offline repository orientation or engineering handoff.",
+      "path": "skills/repo-summary",
+      "sha256": "5e3b7cbc9bec494b3f21c9ca1e81ad16654a57ec741df9aec3f7e20dff2cccfb"
+    },
+    {
+      "name": "skills-creator",
+      "description": "Create and validate portable Agent Skills with a dependency-free restricted authoring profile. Use when scaffolding a skill for mirrored or closed-network distribution.",
+      "path": "skills/skills-creator",
+      "sha256": "8909eba6141d7082cc4283d8a7e7c3b4111b10535760ddbb7c85ca049191bb16"
+    },
+    {
+      "name": "skills-installer",
+      "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
+      "path": "skills/skills-installer",
+      "sha256": "e02f41b26cba3eaa637c76aab17f25822ac4186b1e096a45ff088b9835bffed6"
+    }
+  ]
+}

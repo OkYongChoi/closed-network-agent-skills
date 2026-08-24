@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "sources": [
+    {
+      "name": "openai-skill-creator",
+      "repository": "https://github.com/openai/skills.git",
+      "commit": "4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc",
+      "path": "skills/.system/skill-creator",
+      "archive_sha256": "45fe8580c85c2197fa2700d26f52128ea32a6ce27086fa5d51167c2371d68214",
+      "license": "Apache-2.0",
+      "adapted_as": "skills/skills-creator"
+    },
+    {
+      "name": "openai-skill-installer",
+      "repository": "https://github.com/openai/skills.git",
+      "commit": "49f948faa9258a0c61caceaf225e179651397431",
+      "path": "skills/.system/skill-installer",
+      "archive_sha256": "7ff900325f3add2fff093b92c3766a41c4fa557376aa83485c2be6e1c282b259",
+      "license": "Apache-2.0",
+      "adapted_as": "skills/skills-installer"
+    },
+    {
+      "name": "agent-skills-specification",
+      "repository": "https://github.com/agentskills/agentskills.git",
+      "commit": "69ef37e9424c0a7ea9dd2293b559e43ec8176379",
+      "path": "docs/specification.mdx",
+      "content_sha256": "b9079c0c10b7930e8c6a20ff2bc10cda2a3343c55185120e3f1116a1a529b220",
+      "license": "Apache-2.0",
+      "adapted_as": "references/agent-skills-profile.md"
+    }
+  ]
+}
+
