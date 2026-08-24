@@ -1,5 +1,6 @@
 {
   "format_version": 1,
+  "digest_algorithm": "portable-tree-sha256-v2",
   "repository": {
     "url": "https://github.com/OkYongChoi/skills.git",
     "ref": "5eeb2a37a39d64daaeeac52d2467067bc34983ee",
@@ -10,19 +11,19 @@
       "name": "repo-summary",
       "description": "Summarize a local source repository's structure, likely build and test commands, Git state, and review risks. Use for offline repository orientation or engineering handoff.",
       "path": "skills/repo-summary",
-      "sha256": "5e3b7cbc9bec494b3f21c9ca1e81ad16654a57ec741df9aec3f7e20dff2cccfb"
+      "sha256": "0aa11077a524d6b0d79459cd58364cb2cdfda2990c702109a00ef846c54b5e9c"
     },
     {
       "name": "skills-creator",
       "description": "Create and validate portable Agent Skills with a dependency-free restricted authoring profile. Use when scaffolding a skill for mirrored or closed-network distribution.",
       "path": "skills/skills-creator",
-      "sha256": "8909eba6141d7082cc4283d8a7e7c3b4111b10535760ddbb7c85ca049191bb16"
+      "sha256": "06c51a00efd62f1b8e7e724ea5ec0a27213dc1f9dd9cfff348bfd7e10bd31b14"
     },
     {
       "name": "skills-installer",
       "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
       "path": "skills/skills-installer",
-      "sha256": "cf3c7a03e18c3ee1428e05a9d4778239002d1b37364c03bbc8f8532a94b1e20b"
+      "sha256": "7aaa4a80b018fd58413057e1c0fd40b56f37e6996e0c6c9e6da636b64c141c37"
     }
   ]
 }

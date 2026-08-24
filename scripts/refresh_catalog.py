@@ -73,6 +73,7 @@ def render_catalog() -> bytes:
             continue
         if not NAME_RE.fullmatch(skill.name):
             raise ValueError(f"invalid skill directory name: {skill.name}")
+        INSTALLER._validate_name(skill.name, label="skill directory name")
         items.append(
             {
                 "name": skill.name,
@@ -81,7 +82,12 @@ def render_catalog() -> bytes:
                 "sha256": digest_tree(skill),
             }
         )
-    output = {"format_version": 1, "repository": repository, "skills": items}
+    output = {
+        "format_version": 1,
+        "digest_algorithm": INSTALLER.DIGEST_ALGORITHM,
+        "repository": repository,
+        "skills": items,
+    }
     return (json.dumps(output, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 

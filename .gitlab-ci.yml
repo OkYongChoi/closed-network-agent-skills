@@ -1,0 +1,20 @@
+stages:
+  - verify
+
+variables:
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUTF8: "1"
+
+verify:linux:
+  stage: verify
+  tags:
+    - linux
+  script:
+    - python -B scripts/verify_platform.py --autocrlf-clone
+
+verify:windows:
+  stage: verify
+  tags:
+    - windows
+  script:
+    - python -B scripts/verify_platform.py --autocrlf-clone

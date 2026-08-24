@@ -18,11 +18,16 @@ must be full commit SHAs; accept a branch or tag only when the user explicitly
 requests development behavior and passes `--allow-mutable-ref`.
 
 The installer rejects existing targets, links, hard-linked files, special files,
-case-colliding paths, oversized trees, invalid frontmatter, and digest mismatch.
+Windows junctions/reparse points, Win32-reserved or non-NFC names,
+normalization/case-colliding paths, oversized trees, invalid frontmatter, and
+digest mismatch. Tree digests exclude POSIX modes for NTFS portability; use a
+full commit SHA to authenticate Git executable metadata.
 It validates in a same-filesystem staging directory and publishes with an atomic
 rename. Do not bypass those checks or manually merge into an existing target.
 Stale locks are recovered only when they are old, regular, singly linked,
 same-host locks whose recorded process no longer exists.
+Windows process checks use the non-signalling `OpenProcess` API and fail closed
+when process state cannot be determined.
 
 For mirror bootstrap and the one-time canonical-ref publication step, read the
 repository `README.md`.

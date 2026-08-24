@@ -16,6 +16,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import portable_paths
+
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ALLOWED_FIELDS = {"name", "description", "license", "compatibility"}
 PLAIN_SCALAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._/-]*$")
@@ -23,6 +29,8 @@ YAML_RESERVED = {
     "null", "true", "false", "yes", "no", "on", "off", "y", "n", "~",
     ".nan", ".inf", "+.inf", "-.inf",
 }
+IGNORED_RUNTIME_DIRS = {"__pycache__"}
+IGNORED_RUNTIME_FILES = {".DS_Store"}
 
 
 class SkillError(ValueError):
@@ -34,6 +42,60 @@ def validate_name(name: str) -> None:
         raise SkillError(
             "name must be 1-64 lowercase letters, digits, or single hyphens"
         )
+    try:
+        portable_paths.validate_portable_component(name, label="skill name")
+    except portable_paths.PortablePathError as exc:
+        raise SkillError(str(exc)) from exc
+
+
+def validate_tree_paths(root: Path) -> None:
+    """Reject names that collide or cannot be checked out on Windows."""
+
+    seen: dict[str, str] = {}
+    stack = [root]
+    while stack:
+        directory = stack.pop()
+        try:
+            entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+        except OSError as exc:
+            raise SkillError(f"cannot scan skill tree: {exc}") from exc
+        for entry in entries:
+            if (
+                entry.name in IGNORED_RUNTIME_DIRS
+                or entry.name in IGNORED_RUNTIME_FILES
+                or entry.name.endswith((".pyc", ".pyo"))
+            ):
+                continue
+            path = Path(entry.path)
+            rel = path.relative_to(root).as_posix()
+            try:
+                pure = portable_paths.validate_portable_relative_path(
+                    rel, label="skill path"
+                )
+            except portable_paths.PortablePathError as exc:
+                raise SkillError(str(exc)) from exc
+            key = portable_paths.portable_path_key(pure)
+            previous = seen.setdefault(key, rel)
+            if previous != rel:
+                raise SkillError(
+                    f"normalization/case-colliding paths: {previous!r} and {rel!r}"
+                )
+            try:
+                entry_stat = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise SkillError(f"cannot inspect skill path {rel!r}: {exc}") from exc
+            if entry.is_symlink() or portable_paths.is_windows_reparse_point(
+                entry_stat
+            ):
+                raise SkillError(
+                    f"symbolic links and reparse points are not allowed: {rel}"
+                )
+            if entry.is_dir(follow_symlinks=False):
+                stack.append(path)
+            elif not entry.is_file(follow_symlinks=False):
+                raise SkillError(f"special files are not allowed: {rel}")
+            elif entry_stat.st_nlink != 1:
+                raise SkillError(f"hard-linked files are not allowed: {rel}")
 
 
 def _parse_scalar(raw: str, line_number: int) -> str:
@@ -78,9 +140,18 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 def validate_skill(path: Path, expected_name: str | None = None) -> dict[str, str]:
+    path = path.expanduser()
+    try:
+        root_stat = path.lstat()
+    except OSError as exc:
+        raise SkillError(f"skill directory does not exist: {path}") from exc
+    if path.is_symlink() or portable_paths.is_windows_reparse_point(root_stat):
+        raise SkillError("skill directory must not be a symbolic link or reparse point")
     path = path.resolve()
     if not path.is_dir():
         raise SkillError(f"skill directory does not exist: {path}")
+    validate_name(expected_name or path.name)
+    validate_tree_paths(path)
     skill_file = path / "SKILL.md"
     if not skill_file.is_file() or skill_file.is_symlink():
         raise SkillError("skill must contain a regular SKILL.md")
@@ -118,6 +189,15 @@ def create_skill(
         raise SkillError("description must be 1-1024 characters")
     output = output.expanduser().resolve()
     target = output / name
+    if (
+        os.name == "nt"
+        and portable_paths.utf16_units(str(target))
+        > portable_paths.MAX_WINDOWS_ABSOLUTE_PATH_UTF16_UNITS
+    ):
+        raise SkillError(
+            "Windows output path exceeds "
+            f"{portable_paths.MAX_WINDOWS_ABSOLUTE_PATH_UTF16_UNITS} UTF-16 code units"
+        )
     if target.exists():
         raise SkillError(f"destination already exists: {target}")
     output.mkdir(parents=True, exist_ok=True)

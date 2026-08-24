@@ -28,6 +28,16 @@ python3 skills/repo-summary/scripts/repo_summary.py .
 python3 -m unittest discover -s tests -v
 ```
 
+On Windows PowerShell, invoke every entry point through Python so executable-bit
+differences between NTFS and POSIX do not matter:
+
+```powershell
+python -B skills/skills-creator/scripts/skill_tool.py validate skills/repo-summary
+python -B skills/skills-installer/scripts/skill_installer.py list
+python -B skills/repo-summary/scripts/repo_summary.py .
+python -B scripts/verify_platform.py --autocrlf-clone
+```
+
 Create a skill:
 
 ```bash
@@ -81,10 +91,36 @@ After bootstrap, set `AGENT_SKILLS_SOURCE` to the internal Git URL and
 `AGENT_SKILLS_REF` to the approved full SHA. Local filesystem mirrors are also
 supported and do not need a ref.
 
+PowerShell bootstrap against an internal GitLab mirror:
+
+```powershell
+git clone --mirror https://github.com/OkYongChoi/skills.git skills.git
+git --git-dir skills.git rev-parse refs/heads/main
+# Transfer skills.git through the approved process, then push it to GitLab.
+git --git-dir skills.git push --mirror https://gitlab.corp.example/agents/skills.git
+
+git clone https://gitlab.corp.example/agents/skills.git
+Set-Location skills
+git checkout --detach $env:APPROVED_SKILLS_COMMIT
+python -B skills/skills-installer/scripts/skill_installer.py install skills-installer `
+  --source . --agent-home "$env:USERPROFILE/.agents"
+$env:AGENT_SKILLS_SOURCE = "https://gitlab.corp.example/agents/skills.git"
+$env:AGENT_SKILLS_REF = $env:APPROVED_SKILLS_COMMIT
+```
+
+For a bare mirror already imported into GitLab, update it on the connected side
+with `git remote update --prune`, review the new full commit SHA, and transfer the
+mirror using the same approved process. The runtime installer talks only to the
+configured Git remote and never calls GitHub or GitLab APIs.
+
 ## Release integrity
 
-`catalog.json` contains a deterministic SHA-256 for every skill tree. The digest
-covers paths, sizes, normalized install modes, and contents. Python bytecode,
+`catalog.json` contains a deterministic SHA-256 for every skill tree. The
+`portable-tree-sha256-v2` digest covers portable paths, sizes, and contents, but
+deliberately excludes POSIX mode bits because NTFS checkouts cannot reproduce
+them. A pinned Git commit still authenticates executable bits for POSIX remote
+installs; Windows invokes Python scripts explicitly with `python -B`. Python
+bytecode,
 `__pycache__`, and `.DS_Store` are excluded before any link traversal and are never
 installed. Refresh the catalog
 after an intentional skill change, review the diff, then run the test suite:
@@ -103,6 +139,33 @@ recovered only after the configured stale interval when it is a singly linked
 regular file created on the same host and its recorded process no longer exists.
 Malformed, foreign-host, live-process, linked, and recently modified locks fail
 closed. Tune the one-hour default with `--stale-lock-seconds`.
+
+## Linux, Windows, and GitLab verification
+
+The portable profile rejects Win32 device names (`CON`, `NUL`, `COM1`, and
+related names), reserved characters and alternate-data-stream colons, trailing
+dots/spaces, non-NFC names, normalization/casefold collisions, overlong relative
+paths, symbolic links, Windows junctions/reparse points, hard links, and special
+files. Windows process liveness uses `OpenProcess`; it never calls `os.kill`,
+whose Windows behavior is not a signal-zero existence probe.
+
+`.gitattributes` forces all hashed text formats to LF even when
+`core.autocrlf=true`; common binary formats are explicitly marked `binary`.
+Run the complete offline acceptance suite with:
+
+```bash
+python -B scripts/verify_platform.py --autocrlf-clone
+```
+
+The command builds a temporary Git snapshot, clones it with
+`core.autocrlf=true` and `core.eol=crlf`, then reruns unit tests, catalog digest
+verification, and Git attribute checks without network access.
+
+`.gitlab-ci.yml` defines separate `verify:linux` and `verify:windows` jobs for
+shell runners tagged `linux` and `windows`; the Windows shell executor may use
+its default PowerShell (`pwsh`). Adjust only the runner tags if your internal
+GitLab uses different labels. Each runner needs Python 3.11+ and Git on `PATH`;
+no package download, container image, or external Python dependency is used.
 
 ## Verified release snapshot
 

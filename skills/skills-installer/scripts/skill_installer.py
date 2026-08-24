@@ -23,6 +23,12 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Iterator
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import portable_paths
+
 CANONICAL_SOURCE = "https://github.com/OkYongChoi/skills.git"
 # Reviewed initial release commit. A repository catalog ref is preferred when
 # this script is run from a checkout containing a newer approved catalog.
@@ -40,6 +46,7 @@ DEFAULT_MAX_BYTES = 20 * 1024 * 1024
 DEFAULT_STALE_LOCK_SECONDS = 60 * 60
 IGNORED_RUNTIME_DIRS = {"__pycache__"}
 IGNORED_RUNTIME_FILES = {".DS_Store"}
+DIGEST_ALGORITHM = "portable-tree-sha256-v2"
 
 
 class InstallError(RuntimeError):
@@ -88,7 +95,15 @@ def _catalog_repository_ref(root: Path | None) -> str | None:
     if root is None:
         return None
     catalog_file = root / "catalog.json"
-    if catalog_file.is_symlink() or not catalog_file.is_file():
+    try:
+        catalog_stat = catalog_file.lstat()
+    except OSError:
+        return None
+    if (
+        catalog_file.is_symlink()
+        or portable_paths.is_windows_reparse_point(catalog_stat)
+        or not stat.S_ISREG(catalog_stat.st_mode)
+    ):
         return None
     try:
         raw = json.loads(catalog_file.read_text(encoding="utf-8"))
@@ -123,7 +138,20 @@ def acquire_source(
     source: str, ref: str | None, allow_mutable_ref: bool
 ) -> Iterator[tuple[Path, str | None]]:
     if _is_local_source(source):
-        root = Path(source).expanduser().resolve()
+        source_path = Path(source).expanduser()
+        try:
+            source_stat = source_path.lstat()
+        except OSError as exc:
+            raise InstallError(f"local source is not a directory: {source_path}") from exc
+        if (
+            source_path.is_symlink()
+            or portable_paths.is_windows_reparse_point(source_stat)
+            or not stat.S_ISDIR(source_stat.st_mode)
+        ):
+            raise InstallError(
+                f"local source must not be a symbolic link or reparse point: {source_path}"
+            )
+        root = source_path.resolve()
         if not root.is_dir():
             raise InstallError(f"local source is not a directory: {root}")
         yield root, None
@@ -153,17 +181,45 @@ def acquire_source(
 
 
 def _safe_catalog_path(value: object) -> PurePosixPath:
-    if not isinstance(value, str) or not value:
-        raise InstallError("catalog path must be a non-empty string")
-    path = PurePosixPath(value)
-    if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
-        raise InstallError(f"unsafe catalog path: {value!r}")
-    return path
+    try:
+        return portable_paths.validate_portable_relative_path(
+            value, label="catalog path"
+        )
+    except portable_paths.PortablePathError as exc:
+        raise InstallError(str(exc)) from exc
+
+
+def _validate_name(name: object, *, label: str = "skill name") -> str:
+    if not isinstance(name, str) or not NAME_RE.fullmatch(name):
+        raise InstallError(f"invalid {label}: {name!r}")
+    try:
+        portable_paths.validate_portable_component(name, label=label)
+    except portable_paths.PortablePathError as exc:
+        raise InstallError(str(exc)) from exc
+    return name
 
 
 def load_catalog(root: Path) -> dict[str, dict[str, object]]:
+    try:
+        root_stat = root.lstat()
+    except OSError as exc:
+        raise InstallError("catalog root must be a regular directory") from exc
+    if (
+        root.is_symlink()
+        or portable_paths.is_windows_reparse_point(root_stat)
+        or not stat.S_ISDIR(root_stat.st_mode)
+    ):
+        raise InstallError("catalog root must not be a symbolic link or reparse point")
     catalog_file = root / "catalog.json"
-    if catalog_file.is_symlink() or not catalog_file.is_file():
+    try:
+        catalog_stat = catalog_file.lstat()
+    except OSError as exc:
+        raise InstallError("catalog.json must be a regular file") from exc
+    if (
+        catalog_file.is_symlink()
+        or portable_paths.is_windows_reparse_point(catalog_stat)
+        or not stat.S_ISREG(catalog_stat.st_mode)
+    ):
         raise InstallError("catalog.json must be a regular file")
     try:
         raw = json.loads(catalog_file.read_text(encoding="utf-8"))
@@ -171,20 +227,31 @@ def load_catalog(root: Path) -> dict[str, dict[str, object]]:
         raise InstallError(f"cannot read catalog.json: {exc}") from exc
     if not isinstance(raw, dict) or raw.get("format_version") != 1:
         raise InstallError("unsupported catalog format")
+    if raw.get("digest_algorithm") != DIGEST_ALGORITHM:
+        raise InstallError(
+            f"catalog digest_algorithm must be {DIGEST_ALGORITHM!r}"
+        )
     items = raw.get("skills")
     if not isinstance(items, list):
         raise InstallError("catalog skills must be a list")
     catalog: dict[str, dict[str, object]] = {}
+    seen_paths: dict[str, str] = {}
     for item in items:
         if not isinstance(item, dict):
             raise InstallError("catalog entry must be an object")
         name = item.get("name")
         digest = item.get("sha256")
-        if not isinstance(name, str) or not NAME_RE.fullmatch(name):
-            raise InstallError(f"invalid catalog skill name: {name!r}")
+        name = _validate_name(name, label="catalog skill name")
         if name in catalog:
             raise InstallError(f"duplicate catalog skill: {name}")
-        _safe_catalog_path(item.get("path"))
+        catalog_path = _safe_catalog_path(item.get("path"))
+        path_key = portable_paths.portable_path_key(catalog_path)
+        previous_path = seen_paths.setdefault(path_key, catalog_path.as_posix())
+        if previous_path != catalog_path.as_posix():
+            raise InstallError(
+                f"portable-colliding catalog paths: {previous_path!r} and "
+                f"{catalog_path.as_posix()!r}"
+            )
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise InstallError(f"invalid catalog digest for {name}")
         catalog[name] = item
@@ -211,6 +278,7 @@ def _parse_scalar(raw: str, line_number: int) -> str:
 
 
 def validate_skill(skill_dir: Path, expected_name: str) -> None:
+    _validate_name(expected_name)
     skill_file = skill_dir / "SKILL.md"
     if not skill_file.is_file() or skill_file.is_symlink():
         raise InstallError("skill must contain a regular SKILL.md")
@@ -244,7 +312,15 @@ def validate_skill(skill_dir: Path, expected_name: str) -> None:
 def inspect_tree(
     root: Path, max_files: int = DEFAULT_MAX_FILES, max_bytes: int = DEFAULT_MAX_BYTES
 ) -> list[tuple[Path, str, os.stat_result]]:
-    if root.is_symlink() or not root.is_dir():
+    try:
+        root_stat = root.lstat()
+    except OSError as exc:
+        raise InstallError("skill path must be a regular directory") from exc
+    if (
+        root.is_symlink()
+        or portable_paths.is_windows_reparse_point(root_stat)
+        or not stat.S_ISDIR(root_stat.st_mode)
+    ):
         raise InstallError("skill path must be a regular directory")
     files: list[tuple[Path, str, os.stat_result]] = []
     seen_case: dict[str, str] = {}
@@ -265,17 +341,22 @@ def inspect_tree(
                 or entry.name.endswith((".pyc", ".pyo"))
             ):
                 continue
-            pure = PurePosixPath(rel)
-            if pure.is_absolute() or any(part in ("", ".", "..") for part in pure.parts):
-                raise InstallError(f"unsafe path in skill: {rel!r}")
-            folded = rel.casefold()
+            try:
+                pure = portable_paths.validate_portable_relative_path(
+                    rel, label="skill path"
+                )
+            except portable_paths.PortablePathError as exc:
+                raise InstallError(str(exc)) from exc
+            folded = portable_paths.portable_path_key(pure)
             previous = seen_case.setdefault(folded, rel)
             if previous != rel:
-                raise InstallError(f"case-colliding paths: {previous!r} and {rel!r}")
+                raise InstallError(
+                    f"normalization/case-colliding paths: {previous!r} and {rel!r}"
+                )
             info = entry.stat(follow_symlinks=False)
             mode = info.st_mode
-            if stat.S_ISLNK(mode):
-                raise InstallError(f"symbolic links are not allowed: {rel}")
+            if stat.S_ISLNK(mode) or portable_paths.is_windows_reparse_point(info):
+                raise InstallError(f"symbolic links and reparse points are not allowed: {rel}")
             if stat.S_ISDIR(mode):
                 stack.append(path)
                 continue
@@ -294,14 +375,12 @@ def inspect_tree(
 
 def tree_digest(files: list[tuple[Path, str, os.stat_result]]) -> str:
     digest = hashlib.sha256()
+    digest.update(DIGEST_ALGORITHM.encode("ascii") + b"\0")
     for path, rel, info in files:
         digest.update(b"file\0")
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
         digest.update(str(info.st_size).encode("ascii"))
-        digest.update(b"\0")
-        normalized_mode = stat.S_IMODE(info.st_mode) & 0o755
-        digest.update(f"{normalized_mode:04o}".encode("ascii"))
         digest.update(b"\0")
         flags = os.O_RDONLY
         if hasattr(os, "O_NOFOLLOW"):
@@ -323,12 +402,24 @@ def tree_digest(files: list[tuple[Path, str, os.stat_result]]) -> str:
 
 def _resolve_skill_path(root: Path, item: dict[str, object]) -> Path:
     relative = _safe_catalog_path(item["path"])
+    try:
+        root_stat = root.lstat()
+    except OSError as exc:
+        raise InstallError("source root is not a regular directory") from exc
+    if root.is_symlink() or portable_paths.is_windows_reparse_point(root_stat):
+        raise InstallError("source root must not be a symbolic link or reparse point")
     root = root.resolve()
     candidate = root
     for part in relative.parts:
         candidate = candidate / part
-        if candidate.is_symlink():
-            raise InstallError(f"catalog path contains a symbolic link: {candidate}")
+        try:
+            candidate_stat = candidate.lstat()
+        except OSError as exc:
+            raise InstallError(f"catalog path does not exist: {candidate}") from exc
+        if candidate.is_symlink() or portable_paths.is_windows_reparse_point(candidate_stat):
+            raise InstallError(
+                f"catalog path contains a symbolic link or reparse point: {candidate}"
+            )
     path = candidate.resolve()
     try:
         path.relative_to(root.resolve())
@@ -337,7 +428,37 @@ def _resolve_skill_path(root: Path, item: dict[str, object]) -> Path:
     return path
 
 
-def _pid_is_running(pid: int) -> bool:
+def _windows_pid_is_running(pid: int) -> bool:
+    """Query a Windows process without sending a signal.
+
+    Only ERROR_INVALID_PARAMETER is treated as a definitely missing process.
+    Access denied and unexpected API failures fail closed as "running".
+    """
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+        process_query_limited_information = 0x1000
+        handle = open_process(process_query_limited_information, False, pid)
+        if handle:
+            close_handle(handle)
+            return True
+        return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER
+    except (AttributeError, OSError, ValueError):
+        return True
+
+
+def _pid_is_running(pid: int, platform: str | None = None) -> bool:
+    if (platform or os.name) == "nt":
+        return _windows_pid_is_running(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -358,6 +479,7 @@ def _recover_stale_lock(lock: Path, stale_after: int) -> bool:
     if (
         stale_after < 0
         or not stat.S_ISREG(before.st_mode)
+        or portable_paths.is_windows_reparse_point(before)
         or before.st_nlink != 1
         or time.time() - before.st_mtime < stale_after
     ):
@@ -478,6 +600,15 @@ def install_skill(
     destination = destination.expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
     target = destination / name
+    if (
+        os.name == "nt"
+        and portable_paths.utf16_units(str(target))
+        > portable_paths.MAX_WINDOWS_ABSOLUTE_PATH_UTF16_UNITS
+    ):
+        raise InstallError(
+            "Windows installation path exceeds "
+            f"{portable_paths.MAX_WINDOWS_ABSOLUTE_PATH_UTF16_UNITS} UTF-16 code units"
+        )
     lock = destination / f".{name}.install.lock"
     with acquire_install_lock(lock, stale_lock_seconds):
         if target.exists() or target.is_symlink():
@@ -491,9 +622,21 @@ def install_skill(
                 output.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source_file, output, follow_symlinks=False)
                 copied = output.lstat()
-                if not stat.S_ISREG(copied.st_mode) or copied.st_nlink != 1:
+                if (
+                    not stat.S_ISREG(copied.st_mode)
+                    or copied.st_nlink != 1
+                    or portable_paths.is_windows_reparse_point(copied)
+                ):
                     raise InstallError(f"source changed while copying: {rel}")
-                os.chmod(output, stat.S_IMODE(source_info.st_mode) & 0o755)
+                # NTFS checkouts do not provide portable POSIX executable bits.
+                # Preserve approved source modes on POSIX, while Windows uses a
+                # writable regular-file mode and invokes scripts via Python.
+                output_mode = (
+                    0o644
+                    if os.name == "nt"
+                    else stat.S_IMODE(source_info.st_mode) & 0o755
+                )
+                os.chmod(output, output_mode)
             staged_files = inspect_tree(staged, max_files, max_bytes)
             validate_skill(staged, name)
             if tree_digest(staged_files) != actual:

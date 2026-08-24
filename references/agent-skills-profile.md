@@ -10,6 +10,13 @@ Every skill is a directory whose basename equals the `name` field and which has 
 `SKILL.md`. Optional `scripts/`, `references/`, and `assets/` directories may be
 present. Other ordinary files are allowed by the installer.
 
+Paths use `/` in the catalog and must be portable across Linux and Windows.
+Components must be NFC-normalized, avoid Win32 reserved device names and
+characters, and remain within the documented UTF-16 limits. The validator also
+rejects normalization/casefold collisions, links, junctions/reparse points,
+hard-linked files, and special files. These constraints are a repository
+distribution profile, not additional claims about the upstream specification.
+
 ## Supported frontmatter
 
 The stdlib parser supports a YAML-compatible subset:
