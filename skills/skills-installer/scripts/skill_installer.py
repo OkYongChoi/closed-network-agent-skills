@@ -26,7 +26,7 @@ from typing import Iterator
 CANONICAL_SOURCE = "https://github.com/OkYongChoi/skills.git"
 # Reviewed initial release commit. A repository catalog ref is preferred when
 # this script is run from a checkout containing a newer approved catalog.
-CANONICAL_REF: str | None = "5eeb2a3f0eaa5dc8f3ed4052426bfe9899e5f6ba"
+CANONICAL_REF: str | None = "5eeb2a37a39d64daaeeac52d2467067bc34983ee"
 FULL_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ALLOWED_FIELDS = {"name", "description", "license", "compatibility"}
