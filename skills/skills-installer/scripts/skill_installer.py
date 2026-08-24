@@ -463,12 +463,23 @@ def _windows_pid_is_running(pid: int) -> bool:
         close_handle = kernel32.CloseHandle
         close_handle.argtypes = (wintypes.HANDLE,)
         close_handle.restype = wintypes.BOOL
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        )
+        get_exit_code.restype = wintypes.BOOL
         process_query_limited_information = 0x1000
         handle = open_process(process_query_limited_information, False, pid)
-        if handle:
+        if not handle:
+            return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER
+        try:
+            exit_code = wintypes.DWORD()
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                return True
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
             close_handle(handle)
-            return True
-        return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER
     except (AttributeError, OSError, ValueError):
         return True
 

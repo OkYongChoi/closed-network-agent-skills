@@ -560,6 +560,65 @@ class InstallerTests(unittest.TestCase):
             windows_probe.assert_called_once_with(123456)
             kill.assert_not_called()
 
+    def test_windows_pid_probe_checks_exit_code_and_closes_handle(self):
+        import ctypes
+
+        open_process = mock.Mock(return_value=123)
+        close_handle = mock.Mock(return_value=True)
+
+        def exited(_handle, exit_code):
+            exit_code._obj.value = 0
+            return True
+
+        get_exit_code = mock.Mock(side_effect=exited)
+        kernel32 = types.SimpleNamespace(
+            OpenProcess=open_process,
+            CloseHandle=close_handle,
+            GetExitCodeProcess=get_exit_code,
+        )
+        with mock.patch.object(
+            ctypes, "WinDLL", return_value=kernel32, create=True
+        ):
+            self.assertFalse(installer._windows_pid_is_running(123456))
+        get_exit_code.assert_called_once()
+        close_handle.assert_called_once_with(123)
+
+        def still_active(_handle, exit_code):
+            exit_code._obj.value = 259
+            return True
+
+        get_exit_code.reset_mock(side_effect=True)
+        get_exit_code.side_effect = still_active
+        close_handle.reset_mock()
+        with mock.patch.object(
+            ctypes, "WinDLL", return_value=kernel32, create=True
+        ):
+            self.assertTrue(installer._windows_pid_is_running(123456))
+        close_handle.assert_called_once_with(123)
+
+        get_exit_code.reset_mock(side_effect=True)
+        get_exit_code.return_value = False
+        close_handle.reset_mock()
+        with mock.patch.object(
+            ctypes, "WinDLL", return_value=kernel32, create=True
+        ):
+            self.assertTrue(installer._windows_pid_is_running(123456))
+        close_handle.assert_called_once_with(123)
+
+        open_process.return_value = None
+        close_handle.reset_mock()
+        with mock.patch.object(
+            ctypes, "WinDLL", return_value=kernel32, create=True
+        ), mock.patch.object(ctypes, "get_last_error", return_value=5, create=True):
+            self.assertTrue(installer._windows_pid_is_running(123456))
+        close_handle.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "Windows process-handle semantics")
+    def test_windows_waited_subprocess_is_not_alive(self):
+        process = subprocess.Popen([sys.executable, "-B", "-c", "pass"])
+        process.wait(timeout=10)
+        self.assertFalse(installer._pid_is_running(process.pid, platform="nt"))
+
     def test_full_sha_remote_clone_and_install(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
