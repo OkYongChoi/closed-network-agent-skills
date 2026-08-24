@@ -170,17 +170,19 @@ no package download, container image, or external Python dependency is used.
 ## Verified release snapshot
 
 - Public repository: <https://github.com/OkYongChoi/skills>
-- Verified implementation commit: `559fbe32c4846ba1563af51234f12e3a3614e0ba`
+- Verified implementation commit: `827f91f431ee65f563821d3edc953017376bb778`
 - `skills-creator` source: `openai/skills@4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc`
 - `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
 - Agent Skills specification snapshot: `69ef37e9424c0a7ea9dd2293b559e43ec8176379`
 
-On 2026-08-24, a clean HTTPS clone at the verified commit passed catalog
-verification and 23 tests; one case-collision test was conditionally skipped on
-the local case-insensitive macOS filesystem and is exercised by Linux CI. A
-pinned remote install of `repo-summary` matched the catalogued source tree and
-ran successfully. The corresponding [GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32698233030)
-passed.
+On 2026-08-24, catalog validation, all 42 tests, and an offline
+`core.autocrlf=true` clean-clone check passed. The corresponding
+[GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32706959494)
+passed on Ubuntu and Windows with Python 3.11 and 3.13, including native Windows
+hard-link, junction, and process-handle checks. A pinned `repo-summary` install
+matched its catalogued tree and required no GitHub or GitLab API. Internal
+GitLab runner execution remains an environment-specific acceptance step after
+mirror import.
 
 ## Provenance and license
 
