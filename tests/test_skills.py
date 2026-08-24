@@ -21,6 +21,7 @@ CREATOR_PATH = ROOT / "skills/skills-creator/scripts/skill_tool.py"
 INSTALLER_PATH = ROOT / "skills/skills-installer/scripts/skill_installer.py"
 SUMMARY_PATH = ROOT / "skills/repo-summary/scripts/repo_summary.py"
 REFRESH_PATH = ROOT / "scripts/refresh_catalog.py"
+VERIFY_PATH = ROOT / "scripts/verify_platform.py"
 
 
 def load_module(name: str, path: Path):
@@ -35,6 +36,7 @@ creator = load_module("skill_tool_test", CREATOR_PATH)
 installer = load_module("skill_installer_test", INSTALLER_PATH)
 summary = load_module("repo_summary_test", SUMMARY_PATH)
 refresh = load_module("refresh_catalog_test", REFRESH_PATH)
+platform_verify = load_module("verify_platform_test", VERIFY_PATH)
 
 
 @contextmanager
@@ -591,6 +593,18 @@ class InstallerTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_nul_delimited_git_attribute_parser(self):
+        parsed = platform_verify.parse_check_attr_z(
+            b"skills/sample/SKILL.md\0text\0set\0"
+            b"skills/sample/SKILL.md\0eol\0lf\0"
+        )
+        self.assertEqual(
+            parsed,
+            {"skills/sample/SKILL.md": {"text": "set", "eol": "lf"}},
+        )
+        with self.assertRaises(platform_verify.VerifyError):
+            platform_verify.parse_check_attr_z(b"path\0text\0")
+
     def test_catalog_is_current(self):
         result = subprocess.run(
             [sys.executable, "-B", str(ROOT / "scripts/refresh_catalog.py"), "--check"],

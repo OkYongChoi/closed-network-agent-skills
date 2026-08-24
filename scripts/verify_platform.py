@@ -55,27 +55,42 @@ def catalogued_text_paths(root: Path) -> list[str]:
     return sorted(set(paths))
 
 
+def parse_check_attr_z(output: bytes) -> dict[str, dict[str, str]]:
+    """Parse `git check-attr -z` path/attribute/value triples."""
+
+    fields = output.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()
+    if len(fields) % 3:
+        raise VerifyError("git check-attr returned malformed NUL-delimited output")
+    attributes: dict[str, dict[str, str]] = {}
+    try:
+        for index in range(0, len(fields), 3):
+            path, attribute, value = (
+                field.decode("utf-8") for field in fields[index : index + 3]
+            )
+            attributes.setdefault(path, {})[attribute] = value
+    except UnicodeDecodeError as exc:
+        raise VerifyError("git check-attr returned non-UTF-8 path metadata") from exc
+    return attributes
+
+
 def verify_git_attributes(root: Path) -> None:
     paths = catalogued_text_paths(root)
-    payload = "".join(f"{path}\n" for path in paths)
-    print("+ git check-attr --stdin text eol", flush=True)
+    payload = b"".join(path.encode("utf-8") + b"\0" for path in paths)
+    print("+ git check-attr -z --stdin text eol", flush=True)
     result = subprocess.run(
-        ["git", "check-attr", "--stdin", "text", "eol"],
+        ["git", "check-attr", "-z", "--stdin", "text", "eol"],
         cwd=root,
         input=payload,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         timeout=30,
     )
     if result.returncode != 0:
-        raise VerifyError(result.stderr.strip() or "git check-attr failed")
-    attributes: dict[str, dict[str, str]] = {}
-    for line in result.stdout.splitlines():
-        path, attribute, value = line.rsplit(": ", 2)
-        attributes.setdefault(path, {})[attribute] = value
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise VerifyError(detail or "git check-attr failed")
+    attributes = parse_check_attr_z(result.stdout)
     failures = [
         path
         for path in paths
