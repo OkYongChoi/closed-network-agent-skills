@@ -104,6 +104,21 @@ regular file created on the same host and its recorded process no longer exists.
 Malformed, foreign-host, live-process, linked, and recently modified locks fail
 closed. Tune the one-hour default with `--stale-lock-seconds`.
 
+## Verified release snapshot
+
+- Public repository: <https://github.com/OkYongChoi/skills>
+- Verified implementation commit: `559fbe32c4846ba1563af51234f12e3a3614e0ba`
+- `skills-creator` source: `openai/skills@4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc`
+- `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
+- Agent Skills specification snapshot: `69ef37e9424c0a7ea9dd2293b559e43ec8176379`
+
+On 2026-08-24, a clean HTTPS clone at the verified commit passed catalog
+verification and 23 tests; one case-collision test was conditionally skipped on
+the local case-insensitive macOS filesystem and is exercised by Linux CI. A
+pinned remote install of `repo-summary` matched the catalogued source tree and
+ran successfully. The corresponding [GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32698233030)
+passed.
+
 ## Provenance and license
 
 The implementation is adapted from the locked OpenAI system skills and the Agent
