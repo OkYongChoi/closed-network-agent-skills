@@ -134,18 +134,23 @@ class CreatorTests(unittest.TestCase):
             "x" * 256,
         ):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temp:
+                with self.assertRaises(creator.portable_paths.PortablePathError):
+                    creator.portable_paths.validate_portable_relative_path(relative)
                 skill = write_skill(Path(temp))
                 candidate = skill / relative
                 try:
                     candidate.write_text("x", encoding="utf-8")
                 except OSError:
-                    # The host rejected the path before the portable validator;
-                    # validate the same component directly for deterministic coverage.
-                    with self.assertRaises(creator.portable_paths.PortablePathError):
-                        creator.portable_paths.validate_portable_relative_path(relative)
-                else:
-                    with self.assertRaises(creator.SkillError):
-                        creator.validate_skill(skill)
+                    continue
+                # NTFS may treat ':' as an alternate data stream and Win32 may
+                # trim trailing dots/spaces. Exercise the tree scanner only when
+                # the directory entry round-trips the hostile spelling exactly.
+                with os.scandir(skill) as entries:
+                    materialized_names = {entry.name for entry in entries}
+                if relative not in materialized_names:
+                    continue
+                with self.assertRaises(creator.SkillError):
+                    creator.validate_skill(skill)
 
     def test_creator_rejects_hard_linked_files(self):
         with tempfile.TemporaryDirectory() as temp:
