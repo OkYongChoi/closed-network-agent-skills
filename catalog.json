@@ -3,7 +3,7 @@
   "digest_algorithm": "portable-tree-sha256-v2",
   "repository": {
     "url": "https://github.com/OkYongChoi/skills.git",
-    "ref": "4ed025fe97795110492230c2b42f0ad94b2c0a0f",
+    "ref": "827f91f431ee65f563821d3edc953017376bb778",
     "ref_status": "pinned-cross-platform-release"
   },
   "skills": [
@@ -23,7 +23,7 @@
       "name": "skills-installer",
       "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
       "path": "skills/skills-installer",
-      "sha256": "9a79022fcdead2080c7ccc219dba845877296cc76c0281784073c4be0f69a975"
+      "sha256": "93f956cbcb3f9b5c248fdb7cc2f9de2206bb61878025966a52a051cbb6239a40"
     }
   ]
 }
