@@ -17,13 +17,13 @@
       "name": "skills-creator",
       "description": "Create and validate portable Agent Skills with a dependency-free restricted authoring profile. Use when scaffolding a skill for mirrored or closed-network distribution.",
       "path": "skills/skills-creator",
-      "sha256": "06c51a00efd62f1b8e7e724ea5ec0a27213dc1f9dd9cfff348bfd7e10bd31b14"
+      "sha256": "a8948f9dd4ef8bd8c84cc44478ac79b085d76f4cca0cff246cdd46e568656c23"
     },
     {
       "name": "skills-installer",
       "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
       "path": "skills/skills-installer",
-      "sha256": "8ba046e5a858c8575e2d1c7a430d90ef1864eb9af5ecd069bff16d1f3cd62341"
+      "sha256": "8e65dabcf557910d0082a7c74c0ae43a850cc242ef174bc2632c7e7dbcb0bec3"
     }
   ]
 }

@@ -94,8 +94,18 @@ def validate_tree_paths(root: Path) -> None:
                 stack.append(path)
             elif not entry.is_file(follow_symlinks=False):
                 raise SkillError(f"special files are not allowed: {rel}")
-            elif entry_stat.st_nlink != 1:
-                raise SkillError(f"hard-linked files are not allowed: {rel}")
+            else:
+                try:
+                    entry_stat = portable_paths.full_file_stat(path, entry_stat)
+                    if portable_paths.is_windows_reparse_point(entry_stat):
+                        raise portable_paths.PortablePathError(
+                            f"reparse points are not allowed: {rel}"
+                        )
+                    link_count = portable_paths.file_link_count(path, entry_stat)
+                except portable_paths.PortablePathError as exc:
+                    raise SkillError(str(exc)) from exc
+                if link_count != 1:
+                    raise SkillError(f"hard-linked files are not allowed: {rel}")
 
 
 def _parse_scalar(raw: str, line_number: int) -> str:

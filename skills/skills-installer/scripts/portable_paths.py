@@ -6,9 +6,10 @@ equal so either skill remains self-contained after installation.
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 MAX_COMPONENT_UTF16_UNITS = 255
 MAX_RELATIVE_PATH_UTF16_UNITS = 240
@@ -96,3 +97,117 @@ def is_windows_reparse_point(file_stat: object) -> bool:
 
     attributes = getattr(file_stat, "st_file_attributes", 0)
     return bool(attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _windows_file_link_count(path: Path) -> int:
+    """Read the hard-link count from an opened Windows file handle."""
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class ByHandleFileInformation(ctypes.Structure):
+            _fields_ = [
+                ("dwFileAttributes", wintypes.DWORD),
+                ("ftCreationTime", wintypes.FILETIME),
+                ("ftLastAccessTime", wintypes.FILETIME),
+                ("ftLastWriteTime", wintypes.FILETIME),
+                ("dwVolumeSerialNumber", wintypes.DWORD),
+                ("nFileSizeHigh", wintypes.DWORD),
+                ("nFileSizeLow", wintypes.DWORD),
+                ("nNumberOfLinks", wintypes.DWORD),
+                ("nFileIndexHigh", wintypes.DWORD),
+                ("nFileIndexLow", wintypes.DWORD),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_file = kernel32.CreateFileW
+        create_file.argtypes = (
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        )
+        create_file.restype = wintypes.HANDLE
+        get_information = kernel32.GetFileInformationByHandle
+        get_information.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(ByHandleFileInformation),
+        )
+        get_information.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+
+        share_all = 0x00000001 | 0x00000002 | 0x00000004
+        open_existing = 3
+        open_reparse_point = 0x00200000
+        handle = create_file(
+            str(path),
+            0,
+            share_all,
+            None,
+            open_existing,
+            open_reparse_point,
+            None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle == invalid_handle:
+            raise OSError(ctypes.get_last_error(), "CreateFileW failed")
+        try:
+            information = ByHandleFileInformation()
+            if not get_information(handle, ctypes.byref(information)):
+                raise OSError(
+                    ctypes.get_last_error(), "GetFileInformationByHandle failed"
+                )
+            if information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT:
+                raise PortablePathError(
+                    f"cannot determine hard-link count through a reparse point: {path}"
+                )
+            count = int(information.nNumberOfLinks)
+            if count < 1:
+                raise OSError("Windows returned an invalid hard-link count")
+            return count
+        finally:
+            close_handle(handle)
+    except PortablePathError:
+        raise
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        raise PortablePathError(
+            f"cannot determine hard-link count safely: {path}"
+        ) from exc
+
+
+def file_link_count(
+    path: Path, file_stat: object, *, platform: str | None = None
+) -> int:
+    """Return a trustworthy hard-link count, compensating for DirEntry on Windows."""
+
+    initial = getattr(file_stat, "st_nlink", 0)
+    if isinstance(initial, int) and initial > 0:
+        return initial
+    try:
+        refreshed = os.stat(path, follow_symlinks=False)
+    except OSError:
+        refreshed = None
+    refreshed_count = getattr(refreshed, "st_nlink", 0)
+    if isinstance(refreshed_count, int) and refreshed_count > 0:
+        return refreshed_count
+    if (platform or os.name) == "nt":
+        return _windows_file_link_count(path)
+    raise PortablePathError(f"cannot determine hard-link count safely: {path}")
+
+
+def full_file_stat(path: Path, file_stat: object) -> object:
+    """Refresh incomplete DirEntry metadata before it is used as an identity."""
+
+    initial = getattr(file_stat, "st_nlink", 0)
+    if isinstance(initial, int) and initial > 0:
+        return file_stat
+    try:
+        return os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise PortablePathError(f"cannot obtain complete file metadata: {path}") from exc

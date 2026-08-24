@@ -339,6 +339,79 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(installer.portable_paths.is_windows_reparse_point(reparse))
         self.assertFalse(installer.portable_paths.is_windows_reparse_point(regular))
 
+    def test_zero_direntry_link_count_is_refreshed(self):
+        class ZeroLinkStat:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.st_nlink = 0
+
+            def __getattr__(self, name):
+                return getattr(self.wrapped, name)
+
+        class ZeroLinkEntry:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.name = wrapped.name
+                self.path = wrapped.path
+
+            def stat(self, *, follow_symlinks=True):
+                result = self.wrapped.stat(follow_symlinks=follow_symlinks)
+                if stat.S_ISREG(result.st_mode):
+                    return ZeroLinkStat(result)
+                return result
+
+            def is_symlink(self):
+                return self.wrapped.is_symlink()
+
+            def is_dir(self, *, follow_symlinks=True):
+                return self.wrapped.is_dir(follow_symlinks=follow_symlinks)
+
+            def is_file(self, *, follow_symlinks=True):
+                return self.wrapped.is_file(follow_symlinks=follow_symlinks)
+
+        actual_scandir = os.scandir
+
+        def zero_link_scandir(path):
+            with actual_scandir(path) as entries:
+                return [ZeroLinkEntry(entry) for entry in entries]
+
+        with tempfile.TemporaryDirectory() as temp:
+            skill = write_skill(Path(temp), extra={"data.txt": b"data"})
+            with mock.patch.object(installer.os, "scandir", side_effect=zero_link_scandir):
+                files = installer.inspect_tree(skill)
+                self.assertTrue(all(info.st_nlink == 1 for _, _, info in files))
+                creator.validate_skill(skill)
+
+    def test_windows_link_count_api_is_final_fallback(self):
+        incomplete = types.SimpleNamespace(st_nlink=0)
+        refreshed = types.SimpleNamespace(st_nlink=0)
+        path = Path("unresolved-file")
+        with mock.patch.object(
+            installer.portable_paths.os, "stat", return_value=refreshed
+        ), mock.patch.object(
+            installer.portable_paths, "_windows_file_link_count", return_value=1
+        ) as windows_count:
+            self.assertEqual(
+                installer.portable_paths.file_link_count(
+                    path, incomplete, platform="nt"
+                ),
+                1,
+            )
+            windows_count.assert_called_once_with(path)
+
+    @unittest.skipUnless(os.name == "nt", "Windows hard-link semantics")
+    def test_windows_real_hard_link_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            skill = write_skill(Path(temp), extra={"data.txt": b"data"})
+            try:
+                os.link(skill / "data.txt", skill / "duplicate.txt")
+            except OSError as exc:
+                self.skipTest(f"hard-link creation is unavailable: {exc}")
+            with self.assertRaisesRegex(installer.InstallError, "hard-linked"):
+                installer.inspect_tree(skill)
+            with self.assertRaisesRegex(creator.SkillError, "hard-linked"):
+                creator.validate_skill(skill)
+
     def test_catalog_reparse_attribute_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -362,7 +362,16 @@ def inspect_tree(
                 continue
             if not stat.S_ISREG(mode):
                 raise InstallError(f"special files are not allowed: {rel}")
-            if info.st_nlink != 1:
+            try:
+                info = portable_paths.full_file_stat(path, info)
+                if portable_paths.is_windows_reparse_point(info):
+                    raise portable_paths.PortablePathError(
+                        f"reparse points are not allowed: {rel}"
+                    )
+                link_count = portable_paths.file_link_count(path, info)
+            except portable_paths.PortablePathError as exc:
+                raise InstallError(str(exc)) from exc
+            if link_count != 1:
                 raise InstallError(f"hard-linked files are not allowed: {rel}")
             files.append((path, rel, info))
             total += info.st_size
@@ -390,8 +399,16 @@ def tree_digest(files: list[tuple[Path, str, os.stat_result]]) -> str:
         except OSError as exc:
             raise InstallError(f"cannot safely open skill file: {rel}") from exc
         opened = os.fstat(fd)
-        identity = ("st_dev", "st_ino", "st_size", "st_mode", "st_nlink")
+        identity = ("st_dev", "st_ino", "st_size", "st_mode")
         if any(getattr(opened, field) != getattr(info, field) for field in identity):
+            os.close(fd)
+            raise InstallError(f"skill file changed during verification: {rel}")
+        try:
+            opened_link_count = portable_paths.file_link_count(path, opened)
+        except portable_paths.PortablePathError as exc:
+            os.close(fd)
+            raise InstallError(str(exc)) from exc
+        if opened_link_count != 1:
             os.close(fd)
             raise InstallError(f"skill file changed during verification: {rel}")
         with os.fdopen(fd, "rb") as handle:
@@ -476,11 +493,15 @@ def _recover_stale_lock(lock: Path, stale_after: int) -> bool:
         before = lock.lstat()
     except FileNotFoundError:
         return True
+    try:
+        lock_link_count = portable_paths.file_link_count(lock, before)
+    except portable_paths.PortablePathError:
+        return False
     if (
         stale_after < 0
         or not stat.S_ISREG(before.st_mode)
         or portable_paths.is_windows_reparse_point(before)
-        or before.st_nlink != 1
+        or lock_link_count != 1
         or time.time() - before.st_mtime < stale_after
     ):
         return False
@@ -622,9 +643,13 @@ def install_skill(
                 output.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source_file, output, follow_symlinks=False)
                 copied = output.lstat()
+                try:
+                    copied_link_count = portable_paths.file_link_count(output, copied)
+                except portable_paths.PortablePathError as exc:
+                    raise InstallError(str(exc)) from exc
                 if (
                     not stat.S_ISREG(copied.st_mode)
-                    or copied.st_nlink != 1
+                    or copied_link_count != 1
                     or portable_paths.is_windows_reparse_point(copied)
                 ):
                     raise InstallError(f"source changed while copying: {rel}")
