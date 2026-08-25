@@ -62,7 +62,7 @@ def render_catalog() -> bytes:
     repository = current.get(
         "repository",
         {
-            "url": "https://github.com/OkYongChoi/skills.git",
+            "url": "https://github.com/OkYongChoi/closed-network-agent-skills.git",
             "ref": None,
             "ref_status": "pending-initial-publish",
         },

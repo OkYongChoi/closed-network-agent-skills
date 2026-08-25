@@ -31,10 +31,10 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import portable_paths
 
-CANONICAL_SOURCE = "https://github.com/OkYongChoi/skills.git"
+CANONICAL_SOURCE = "https://github.com/OkYongChoi/closed-network-agent-skills.git"
 # Reviewed cross-platform release commit. A repository catalog ref is preferred when
 # this script is run from a checkout containing a newer approved catalog.
-CANONICAL_REF: str | None = "99c315e5dee947f650e565e86962cd43a43c130d"
+CANONICAL_REF: str | None = "a8257ac34b9f9ca9af2658abbefe5068f24f4060"
 FULL_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ALLOWED_FIELDS = {"name", "description", "license", "compatibility"}
