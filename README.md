@@ -52,8 +52,8 @@ python3 skills/skills-installer/scripts/skill_installer.py install repo-summary 
   --dest /tmp/agent-skills
 ```
 
-Remote sources require a full 40-character commit SHA. Mutable refs are accepted
-only when `--allow-mutable-ref` is explicitly supplied for development:
+An explicit remote ref must be a full 40-character commit SHA. Mutable refs are
+accepted only when `--allow-mutable-ref` is explicitly supplied for development:
 
 ```bash
 python3 skills/skills-installer/scripts/skill_installer.py install repo-summary \
@@ -108,7 +108,58 @@ After central configuration, ordinary users only need:
 
 ```bash
 python3 skills/skills-installer/scripts/skill_installer.py install repo-summary
+python3 skills/skills-installer/scripts/skill_installer.py update repo-summary
 ```
+
+## Latest approved releases
+
+For PR-driven delivery, configure `skills.source` but omit `skills.ref`. The
+installer then fetches `refs/heads/latest-approved`, reads its manifest-only
+`release-manifest.json`, verifies that its `source` exactly matches the configured
+source, and separately fetches the immutable 40-character commit in `ref`.
+`list`, `install NAME`, and `update NAME` all resolve the same approved snapshot.
+An explicit CLI, environment, user-config, or system-config ref remains a pinned
+override and does not consult the pointer.
+
+The manifest contains `name`, `source`, `ref`, `version`, `updatedAt`, the exact
+`catalog.json` SHA-256, every package name/tree digest, and a monotonic pipeline
+`sequence`. The installer compares
+all of these with the immutable checkout before copying content. The mutable
+branch is therefore only a protected control-plane pointer; no skill content is
+installed from it.
+
+`update` records provenance in
+`<skills-destination>/.agent-install-metadata/<name>.json`, outside the catalogued
+skill tree. It verifies the current installation and approved digest, builds the
+replacement in a same-filesystem staging directory, then swaps the directory and
+sidecar. A catchable in-process failure during the swap restores the previous
+directory and sidecar, including `KeyboardInterrupt`. An uncatchable process or
+host termination can leave hidden staging/backup paths because a directory and
+external sidecar cannot be committed in one filesystem rename; rerun `update`
+when the target exists, or have an operator inspect and restore the retained
+backup when it does not. Running update against an already matching install is a
+no-op. Running it for a missing install fails with guidance to use `install`.
+
+A typical centrally deployed config is therefore:
+
+```json
+{
+  "skills": {
+    "source": "https://gitlab.company.local/ai/skills.git",
+    "allowMutableRef": false
+  },
+  "agentHome": "~/.agents"
+}
+```
+
+The source spelling must match the credential-free URL stored by CI in the
+manifest. The checkout containing the running installer and embedded images
+continue to use their local `catalog.json` without a release pointer. A local
+Git mirror selected through central config follows its local
+`refs/heads/latest-approved` when that ref is present; its filesystem path is
+treated as an alias for the credential-free source recorded in that manifest.
+An ordinary non-bare working checkout without that ref remains a direct local
+development source for backward compatibility.
 
 ## Closed-network mirror and bootstrap
 
@@ -131,10 +182,12 @@ python3 skills/skills-installer/scripts/skill_installer.py install skills-instal
   --source . --dest "${AGENT_HOME:-$HOME/.agents}/skills"
 ```
 
-After bootstrap, deploy the approved internal Git URL and full SHA in the system
-config. Environment variables remain useful for ephemeral CI overrides; ordinary
-users do not need to export a ref. Local filesystem mirrors are also supported
-and do not need a ref.
+After bootstrap, deploy the approved internal Git URL in the system config and
+omit `skills.ref` to follow `latest-approved`. Keep a full SHA only when an
+administrator intentionally wants to freeze clients on one snapshot.
+Environment variables remain useful for ephemeral CI overrides; ordinary users
+do not need to export a ref. A local bare or non-bare Git mirror is also
+supported without a ref when it contains `refs/heads/latest-approved`.
 
 PowerShell bootstrap against an internal GitLab mirror:
 
@@ -150,7 +203,7 @@ git checkout --detach $env:APPROVED_SKILLS_COMMIT
 python -B skills/skills-installer/scripts/skill_installer.py install skills-installer `
   --source . --agent-home "$env:USERPROFILE/.agents"
 # Administrators then deploy %ProgramData%\AgentTools\config.json with the
-# approved GitLab source and full commit SHA.
+# approved GitLab source and omit skills.ref to follow latest-approved.
 ```
 
 For a bare mirror already imported into GitLab, update it on the connected side
@@ -211,6 +264,35 @@ shell runners tagged `linux` and `windows`; the Windows shell executor may use
 its default PowerShell (`pwsh`). Adjust only the runner tags if your internal
 GitLab uses different labels. Each runner needs Python 3.11+ and Git on `PATH`;
 no package download, container image, or external Python dependency is used.
+
+After both verification jobs pass on the default branch,
+`publish:latest-approved` runs `scripts/promote_release.py`. It serializes
+promotion with the `latest-approved` resource group and appends a manifest-only
+commit to that branch. Configure GitLab as follows:
+
+1. Protect `latest-approved`; allow pushes only from the role used by approved
+   default-branch pipelines, and prevent ordinary contributors from pushing it.
+2. In **Settings > CI/CD > Job token permissions**, enable **Allow Git push
+   requests to the repository**. This is off by default. A same-project job-token
+   push does not create another pipeline, avoiding a release loop.
+3. Ensure the user whose merge triggered the pipeline has the protected-branch
+   push role. The job token has that triggering user's permissions.
+4. Keep `${CI_PROJECT_URL}.git` credential-free as the manifest source. The
+   authenticated `CI_REPOSITORY_URL` is read from the named environment variable,
+   is not placed in the command line, and is never written to the manifest.
+
+The pipeline IID is recorded as a monotonic sequence. Although `resource_group`
+serializes pushes, GitLab does not guarantee its default queue order; an older
+pipeline therefore skips promotion if a greater or equal sequence is already
+published. Manual rollback explicitly bypasses that stale-pipeline check and
+records a new rollback version and pointer commit.
+
+To roll back, run the manual `rollback:latest-approved` job on the default branch
+with `ROLLBACK_REF` set to an earlier reviewed full SHA. The job publishes a new
+pointer commit, preserving an auditable history; users receive it on their next
+`update`. If your GitLab does not permit job-token pushes, provide an equivalent
+masked protected push URL to the script through CI configuration. Runtime clients
+still need only read access to the repository and never call the GitLab API.
 
 ## Verified release snapshot
 

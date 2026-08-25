@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime
 import hashlib
 import json
 import os
@@ -49,6 +50,10 @@ IGNORED_RUNTIME_DIRS = {"__pycache__"}
 IGNORED_RUNTIME_FILES = {".DS_Store"}
 DIGEST_ALGORITHM = "portable-tree-sha256-v2"
 MAX_CONFIG_BYTES = 64 * 1024
+MAX_MANIFEST_BYTES = 1024 * 1024
+APPROVED_REF = "refs/heads/latest-approved"
+RELEASE_MANIFEST_PATH = "release-manifest.json"
+INSTALL_METADATA_DIR = ".agent-install-metadata"
 CONFIG_TOP_LEVEL_FIELDS = {"skills", "plugins", "agentHome"}
 SKILLS_CONFIG_FIELDS = {"source", "ref", "allowMutableRef"}
 PLUGINS_CONFIG_FIELDS = {"source", "ref", "allowMutableRef", "defaultTarget"}
@@ -67,6 +72,17 @@ class EffectiveConfig(NamedTuple):
     allow_mutable_ref: bool
     agent_home: Path
     origins: dict[str, str]
+
+
+class ApprovedRelease(NamedTuple):
+    source: str
+    ref: str | None
+    version: str | None
+    updated_at: str | None
+    digests: dict[str, str]
+    catalog_sha256: str | None
+    pointer_commit: str | None
+    sequence: int | None
 
 
 def _nonempty_string(value: object, *, field: str, path: Path) -> str:
@@ -357,6 +373,135 @@ def _run_git(args: list[str], cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
+def _source_has_credentials(source: str) -> bool:
+    try:
+        parsed = urlsplit(source)
+        return (
+            parsed.username is not None
+            or parsed.password is not None
+            or bool(parsed.query)
+            or bool(parsed.fragment)
+        )
+    except ValueError:
+        return True
+
+
+def _parse_release_manifest(
+    encoded: bytes, *, expected_source: str, allow_local_alias: bool = False
+) -> ApprovedRelease:
+    if len(encoded) > MAX_MANIFEST_BYTES:
+        raise InstallError(f"release manifest exceeds {MAX_MANIFEST_BYTES} bytes")
+    try:
+        raw = json.loads(encoded.decode("utf-8"), object_pairs_hook=_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise InstallError(f"cannot parse release manifest: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise InstallError("release manifest must be an object")
+    allowed = {
+        "formatVersion", "kind", "name", "source", "ref", "version", "updatedAt",
+        "catalogSha256", "packages", "sequence"
+    }
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise InstallError(f"unknown release manifest field: {unknown[0]}")
+    if raw.get("formatVersion") != 1 or raw.get("kind") != "agent-skills-release":
+        raise InstallError("unsupported release manifest format")
+    if raw.get("name") != "skills":
+        raise InstallError("release manifest name must be 'skills'")
+    sequence = raw.get("sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+        raise InstallError("release manifest sequence must be a non-negative integer")
+    source = _nonempty_string(
+        raw.get("source"), field="release manifest source", path=Path(RELEASE_MANIFEST_PATH)
+    )
+    if _source_has_credentials(source):
+        raise InstallError("release manifest source must not contain credentials")
+    if source != expected_source and not allow_local_alias:
+        raise InstallError("release manifest source does not match the configured source")
+    ref = _nonempty_string(
+        raw.get("ref"), field="release manifest ref", path=Path(RELEASE_MANIFEST_PATH)
+    )
+    if not FULL_SHA_RE.fullmatch(ref):
+        raise InstallError("release manifest ref must be a full 40-character commit SHA")
+    version = _nonempty_string(
+        raw.get("version"), field="release manifest version", path=Path(RELEASE_MANIFEST_PATH)
+    )
+    updated_at = _nonempty_string(
+        raw.get("updatedAt"), field="release manifest updatedAt", path=Path(RELEASE_MANIFEST_PATH)
+    )
+    # Require an unambiguous UTC RFC 3339 timestamp without depending on third-party parsers.
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", updated_at):
+        raise InstallError("release manifest updatedAt must be UTC RFC 3339 (YYYY-MM-DDTHH:MM:SSZ)")
+    catalog_sha256 = raw.get("catalogSha256")
+    if not isinstance(catalog_sha256, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", catalog_sha256
+    ):
+        raise InstallError("release manifest catalogSha256 must be lowercase SHA-256")
+    artifacts = raw.get("packages")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise InstallError("release manifest packages must be a non-empty list")
+    digests: dict[str, str] = {}
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or set(artifact) != {"name", "digest"}:
+            raise InstallError("release manifest package must contain only name and digest")
+        name = _validate_name(artifact.get("name"), label="release artifact name")
+        digest = artifact.get("digest")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise InstallError(f"invalid release artifact digest for {name}")
+        if name in digests:
+            raise InstallError(f"duplicate release artifact: {name}")
+        digests[name] = digest
+    return ApprovedRelease(
+        source, ref.lower(), version, updated_at, digests, catalog_sha256, None, sequence
+    )
+
+
+def fetch_approved_release(source: str) -> ApprovedRelease:
+    """Read the protected mutable pointer, returning only its immutable payload."""
+    with tempfile.TemporaryDirectory(prefix="skills-pointer-") as temp:
+        root = Path(temp)
+        _run_git(["init", "--quiet"], root)
+        _run_git(["remote", "add", "origin", source], root)
+        _run_git(["fetch", "--quiet", "--depth=1", "origin", APPROVED_REF], root)
+        pointer_commit = _run_git(["rev-parse", "FETCH_HEAD^{commit}"], root)
+        try:
+            manifest_size = int(
+                _run_git(
+                    ["cat-file", "-s", f"{pointer_commit}:{RELEASE_MANIFEST_PATH}"],
+                    root,
+                )
+            )
+        except ValueError as exc:
+            raise InstallError("release manifest has an invalid Git object size") from exc
+        if manifest_size > MAX_MANIFEST_BYTES:
+            raise InstallError(
+                f"release manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+            )
+        text = _run_git(["show", f"{pointer_commit}:{RELEASE_MANIFEST_PATH}"], root)
+    release = _parse_release_manifest(
+        text.encode("utf-8"),
+        expected_source=source,
+        allow_local_alias=_is_local_source(source),
+    )
+    return release._replace(pointer_commit=pointer_commit)
+
+
+def validate_release_catalog(
+    release: ApprovedRelease,
+    catalog: dict[str, dict[str, object]],
+    catalog_file: Path,
+) -> None:
+    try:
+        encoded = catalog_file.read_bytes()
+    except OSError as exc:
+        raise InstallError(f"cannot read approved catalog: {exc}") from exc
+    if hashlib.sha256(encoded).hexdigest() != release.catalog_sha256:
+        raise InstallError("release manifest catalogSha256 does not match catalog.json")
+    actual = {name: str(item["sha256"]) for name, item in catalog.items()}
+    if release.digests != actual:
+        raise InstallError("release manifest packages do not match the approved catalog")
+
+
 def _checkout_root() -> Path | None:
     candidate = Path(__file__).resolve().parents[3]
     if (candidate / "catalog.json").is_file() and (candidate / "skills").is_dir():
@@ -395,11 +540,29 @@ def _is_local_source(source: str) -> bool:
     return Path(source).expanduser().exists()
 
 
+def _local_has_approved_pointer(source: str) -> bool:
+    if not _is_local_source(source):
+        return False
+    path = Path(source).expanduser()
+    if (path / "HEAD").is_file() and (path / "objects").is_dir():
+        return True
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "show-ref", "--verify", "--quiet", APPROVED_REF],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 @contextlib.contextmanager
 def acquire_source(
     source: str, ref: str | None, allow_mutable_ref: bool
 ) -> Iterator[tuple[Path, str | None]]:
-    if _is_local_source(source):
+    if _is_local_source(source) and ref is None:
         source_path = Path(source).expanduser()
         try:
             source_stat = source_path.lstat()
@@ -881,6 +1044,9 @@ def install_skill(
     max_files: int,
     max_bytes: int,
     stale_lock_seconds: int = DEFAULT_STALE_LOCK_SECONDS,
+    *,
+    replace: bool = False,
+    provenance: dict[str, object] | None = None,
 ) -> Path:
     name = str(item["name"])
     source = _resolve_skill_path(root, item)
@@ -905,10 +1071,22 @@ def install_skill(
         )
     lock = destination / f".{name}.install.lock"
     with acquire_install_lock(lock, stale_lock_seconds):
-        if target.exists() or target.is_symlink():
+        target_exists = target.exists() or target.is_symlink()
+        if target_exists and not replace:
             raise InstallError(f"destination already exists: {target}")
+        if target_exists:
+            target_info = target.lstat()
+            if (
+                target.is_symlink()
+                or portable_paths.is_windows_reparse_point(target_info)
+                or not stat.S_ISDIR(target_info.st_mode)
+            ):
+                raise InstallError(f"existing destination is not a regular directory: {target}")
         stage_root = Path(tempfile.mkdtemp(prefix=f".{name}.stage-", dir=destination))
         staged = stage_root / name
+        backup = stage_root / "previous"
+        metadata_temp: Path | None = None
+        metadata_target: Path | None = None
         try:
             staged.mkdir()
             for source_file, rel, source_info in files:
@@ -939,10 +1117,144 @@ def install_skill(
             validate_skill(staged, name)
             if tree_digest(staged_files) != actual:
                 raise InstallError("staged copy failed integrity verification")
-            os.replace(staged, target)
+            if provenance is not None:
+                metadata_dir = destination / INSTALL_METADATA_DIR
+                if metadata_dir.exists() or metadata_dir.is_symlink():
+                    metadata_info = metadata_dir.lstat()
+                    if (
+                        metadata_dir.is_symlink()
+                        or portable_paths.is_windows_reparse_point(metadata_info)
+                        or not stat.S_ISDIR(metadata_info.st_mode)
+                    ):
+                        raise InstallError("install metadata path must be a regular directory")
+                else:
+                    metadata_dir.mkdir(mode=0o700)
+                metadata_target = metadata_dir / f"{name}.json"
+                if metadata_target.exists() or metadata_target.is_symlink():
+                    metadata_info = metadata_target.lstat()
+                    try:
+                        metadata_links = portable_paths.file_link_count(
+                            metadata_target, metadata_info
+                        )
+                    except portable_paths.PortablePathError as exc:
+                        raise InstallError(str(exc)) from exc
+                    if (
+                        metadata_target.is_symlink()
+                        or portable_paths.is_windows_reparse_point(metadata_info)
+                        or not stat.S_ISREG(metadata_info.st_mode)
+                        or metadata_links != 1
+                    ):
+                        raise InstallError("install metadata must be a regular, singly linked file")
+                metadata_temp = metadata_dir / f".{name}.{os.getpid()}.tmp"
+                if metadata_temp.exists() or metadata_temp.is_symlink():
+                    raise InstallError("temporary install metadata path already exists")
+                payload = dict(provenance)
+                payload.update(
+                    {
+                        "formatVersion": 1,
+                        "kind": "agent-skill-install",
+                        "name": name,
+                        "digest": actual,
+                        "installedAt": datetime.datetime.now(
+                            datetime.timezone.utc
+                        ).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    }
+                )
+                metadata_temp.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            new_moved = False
+            metadata_backup = stage_root / "previous-metadata.json"
+            try:
+                if target_exists:
+                    os.replace(target, backup)
+                os.replace(staged, target)
+                new_moved = True
+                if metadata_temp is not None and metadata_target is not None:
+                    if metadata_target.exists():
+                        os.replace(metadata_target, metadata_backup)
+                    os.replace(metadata_temp, metadata_target)
+            # KeyboardInterrupt/SystemExit are still in-process failures. Restore
+            # the previous installation before propagating them; only an
+            # uncatchable process/host crash can interrupt this recovery path.
+            except BaseException:
+                if metadata_target is not None and metadata_backup.exists():
+                    if metadata_target.exists():
+                        os.replace(
+                            metadata_target, stage_root / "failed-new-metadata.json"
+                        )
+                    os.replace(metadata_backup, metadata_target)
+                elif (
+                    metadata_temp is not None
+                    and metadata_target is not None
+                    and not metadata_temp.exists()
+                    and metadata_target.exists()
+                ):
+                    os.replace(
+                        metadata_target, stage_root / "failed-new-metadata.json"
+                    )
+                if backup.exists():
+                    if target.exists():
+                        os.replace(target, stage_root / "failed-new")
+                    os.replace(backup, target)
+                elif (new_moved or not staged.exists()) and target.exists():
+                    failed = stage_root / "failed-new"
+                    os.replace(target, failed)
+                raise
             return target
         finally:
+            if metadata_temp is not None:
+                try:
+                    metadata_temp.unlink()
+                except FileNotFoundError:
+                    pass
             shutil.rmtree(stage_root, ignore_errors=True)
+
+
+def load_install_metadata(destination: Path, name: str) -> dict[str, object] | None:
+    path = destination.expanduser().resolve() / INSTALL_METADATA_DIR / f"{name}.json"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise InstallError(f"cannot inspect install metadata: {exc}") from exc
+    try:
+        links = portable_paths.file_link_count(path, info)
+    except portable_paths.PortablePathError as exc:
+        raise InstallError(str(exc)) from exc
+    if (
+        path.is_symlink()
+        or portable_paths.is_windows_reparse_point(info)
+        or not stat.S_ISREG(info.st_mode)
+        or links != 1
+    ):
+        raise InstallError("install metadata must be a regular, singly linked file")
+    try:
+        encoded = path.read_bytes()
+        if len(encoded) > MAX_CONFIG_BYTES:
+            raise InstallError("install metadata is too large")
+        raw = json.loads(encoded.decode("utf-8"), object_pairs_hook=_json_object)
+    except InstallError:
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise InstallError(f"cannot parse install metadata: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise InstallError("install metadata must be an object")
+    required = {
+        "formatVersion", "kind", "name", "source", "ref", "digest", "version",
+        "updatedAt", "installedAt"
+    }
+    if set(raw) != required or raw.get("formatVersion") != 1:
+        raise InstallError("install metadata has an unsupported format")
+    if raw.get("kind") != "agent-skill-install" or raw.get("name") != name:
+        raise InstallError("install metadata identity does not match the requested skill")
+    if not isinstance(raw.get("digest"), str) or not re.fullmatch(
+        r"[0-9a-f]{64}", str(raw["digest"])
+    ):
+        raise InstallError("install metadata digest is invalid")
+    return raw
 
 
 def _destination(args: argparse.Namespace, agent_home: Path) -> Path:
@@ -967,16 +1279,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_source_options(effective)
     effective.add_argument("--agent-home", type=Path)
-    install = commands.add_parser("install", help="install one catalogued skill")
-    install.add_argument("name")
-    _add_source_options(install)
-    install.add_argument("--dest", type=Path)
-    install.add_argument("--agent-home", type=Path)
-    install.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
-    install.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
-    install.add_argument(
-        "--stale-lock-seconds", type=int, default=DEFAULT_STALE_LOCK_SECONDS
-    )
+    for command, help_text in (
+        ("install", "install one catalogued skill"),
+        ("update", "safely update one installed skill to the approved release"),
+    ):
+        action = commands.add_parser(command, help=help_text)
+        action.add_argument("name")
+        _add_source_options(action)
+        action.add_argument("--dest", type=Path)
+        action.add_argument("--agent-home", type=Path)
+        action.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+        action.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
+        action.add_argument(
+            "--stale-lock-seconds", type=int, default=DEFAULT_STALE_LOCK_SECONDS
+        )
     return parser
 
 
@@ -994,10 +1310,24 @@ def main(argv: list[str] | None = None) -> int:
             }
             print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
             return 0
+        release: ApprovedRelease | None = None
+        content_ref = config.ref
+        use_pointer = content_ref is None and (
+            not _is_local_source(config.source)
+            or (
+                config.origins.get("source") != "current-checkout"
+                and _local_has_approved_pointer(config.source)
+            )
+        )
+        if use_pointer:
+            release = fetch_approved_release(config.source)
+            content_ref = release.ref
         with acquire_source(
-            config.source, config.ref, config.allow_mutable_ref
+            config.source, content_ref, config.allow_mutable_ref
         ) as (root, commit):
             catalog = load_catalog(root)
+            if release is not None:
+                validate_release_catalog(release, catalog, root / "catalog.json")
             if args.command == "list":
                 for name in sorted(catalog):
                     description = catalog[name].get("description", "")
@@ -1009,13 +1339,54 @@ def main(argv: list[str] | None = None) -> int:
                     raise InstallError(f"skill is not in catalog: {args.name}")
                 if args.max_files < 1 or args.max_bytes < 1 or args.stale_lock_seconds < 0:
                     raise InstallError("size limits must be positive and stale lock age non-negative")
+                item = catalog[args.name]
+                destination = _destination(args, config.agent_home)
+                approved_ref = commit or content_ref
+                provenance = {
+                    "source": _redact_source(
+                        release.source if release is not None else config.source
+                    ),
+                    "ref": approved_ref,
+                    "version": release.version if release else (
+                        f"pinned-{approved_ref[:12]}" if approved_ref else "local-checkout"
+                    ),
+                    "updatedAt": release.updated_at if release else None,
+                }
+                replace = args.command == "update"
+                if replace:
+                    target = destination.expanduser().resolve() / args.name
+                    if not target.exists() and not target.is_symlink():
+                        raise InstallError(
+                            f"skill is not installed; use install first: {target}"
+                        )
+                    metadata = load_install_metadata(destination, args.name)
+                    installed_matches = False
+                    try:
+                        installed_files = inspect_tree(
+                            target, args.max_files, args.max_bytes
+                        )
+                        validate_skill(target, args.name)
+                        installed_matches = tree_digest(installed_files) == item["sha256"]
+                    except InstallError:
+                        installed_matches = False
+                    if (
+                        installed_matches
+                        and metadata is not None
+                        and metadata.get("source") == provenance["source"]
+                        and metadata.get("ref") == provenance["ref"]
+                        and metadata.get("digest") == item["sha256"]
+                    ):
+                        print(f"up-to-date\t{target}")
+                        return 0
                 installed = install_skill(
                     root,
-                    catalog[args.name],
-                    _destination(args, config.agent_home),
+                    item,
+                    destination,
                     args.max_files,
                     args.max_bytes,
                     args.stale_lock_seconds,
+                    replace=replace,
+                    provenance=provenance,
                 )
                 print(installed)
         return 0

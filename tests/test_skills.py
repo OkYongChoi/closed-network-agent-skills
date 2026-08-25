@@ -23,6 +23,7 @@ INSTALLER_PATH = ROOT / "skills/skills-installer/scripts/skill_installer.py"
 SUMMARY_PATH = ROOT / "skills/repo-summary/scripts/repo_summary.py"
 REFRESH_PATH = ROOT / "scripts/refresh_catalog.py"
 VERIFY_PATH = ROOT / "scripts/verify_platform.py"
+PROMOTE_PATH = ROOT / "scripts/promote_release.py"
 
 
 def load_module(name: str, path: Path):
@@ -38,6 +39,7 @@ installer = load_module("skill_installer_test", INSTALLER_PATH)
 summary = load_module("repo_summary_test", SUMMARY_PATH)
 refresh = load_module("refresh_catalog_test", REFRESH_PATH)
 platform_verify = load_module("verify_platform_test", VERIFY_PATH)
+promote = load_module("promote_release_test", PROMOTE_PATH)
 
 
 @contextmanager
@@ -874,6 +876,230 @@ class InstallerTests(unittest.TestCase):
                 item = installer.load_catalog(root)["sample"]
                 target = installer.install_skill(root, item, base / "installed", 100, 1_000_000)
                 self.assertTrue((target / "SKILL.md").is_file())
+
+    def test_release_manifest_is_strict_and_bound_to_source_and_catalog(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            skill = write_skill(root)
+            write_catalog(root, skill)
+            catalog_bytes = (root / "catalog.json").read_bytes()
+            encoded = promote.manifest(
+                catalog_bytes,
+                "https://gitlab.example/ai/skills.git",
+                "a" * 40,
+                "2026.08.25.1",
+                "2026-08-25T01:02:03Z",
+            )
+            release = installer._parse_release_manifest(
+                encoded, expected_source="https://gitlab.example/ai/skills.git"
+            )
+            catalog = installer.load_catalog(root)
+            installer.validate_release_catalog(release, catalog, root / "catalog.json")
+            self.assertEqual(release.ref, "a" * 40)
+            self.assertEqual(release.digests["sample"], catalog["sample"]["sha256"])
+            with self.assertRaisesRegex(installer.InstallError, "configured source"):
+                installer._parse_release_manifest(
+                    encoded, expected_source="https://evil.example/skills.git"
+                )
+            tampered = json.loads(encoded)
+            tampered["packages"][0]["digest"] = "0" * 64
+            bad = installer._parse_release_manifest(
+                json.dumps(tampered).encode(),
+                expected_source="https://gitlab.example/ai/skills.git",
+            )
+            with self.assertRaisesRegex(installer.InstallError, "packages"):
+                installer.validate_release_catalog(bad, catalog, root / "catalog.json")
+
+    def test_latest_approved_pointer_resolves_to_immutable_content_commit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository = Path(temp) / "repository"
+            repository.mkdir()
+            subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
+            skill = write_skill(repository)
+            write_catalog(repository, skill)
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "content"], cwd=repository, check=True)
+            content_ref = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repository, text=True).strip()
+            catalog_bytes = (repository / "catalog.json").read_bytes()
+            source = repository.as_uri()
+            encoded = promote.manifest(
+                catalog_bytes, source, content_ref, "approved-1", "2026-08-25T01:02:03Z"
+            )
+            subprocess.run(["git", "checkout", "--quiet", "--orphan", "latest-approved"], cwd=repository, check=True)
+            subprocess.run(["git", "rm", "-rf", "--quiet", "."], cwd=repository, check=True)
+            (repository / "release-manifest.json").write_bytes(encoded)
+            subprocess.run(["git", "add", "release-manifest.json"], cwd=repository, check=True)
+            subprocess.run(["git", "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "approve"], cwd=repository, check=True)
+            release = installer.fetch_approved_release(source)
+            self.assertEqual(release.ref, content_ref)
+            with installer.acquire_source(source, release.ref, False) as (root, resolved):
+                self.assertEqual(resolved, content_ref)
+                catalog = installer.load_catalog(root)
+                installer.validate_release_catalog(release, catalog, root / "catalog.json")
+            mirror = Path(temp) / "skills.git"
+            subprocess.run(
+                ["git", "clone", "--quiet", "--mirror", str(repository), str(mirror)],
+                check=True,
+            )
+            local_release = installer.fetch_approved_release(str(mirror))
+            self.assertTrue(installer._local_has_approved_pointer(str(mirror)))
+            self.assertTrue(installer._local_has_approved_pointer(str(repository)))
+            self.assertFalse(installer._local_has_approved_pointer(str(ROOT)))
+            self.assertEqual(local_release.source, source)
+            self.assertEqual(local_release.ref, content_ref)
+            with installer.acquire_source(
+                str(mirror), local_release.ref, False
+            ) as (root, resolved):
+                self.assertEqual(resolved, content_ref)
+                installer.validate_release_catalog(
+                    local_release, installer.load_catalog(root), root / "catalog.json"
+                )
+
+    def test_update_replaces_atomically_and_preserves_sidecar_provenance(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            destination = base / "installed"
+            skill = write_skill(source, extra={"version.txt": b"one"})
+            write_catalog(source, skill)
+            item = installer.load_catalog(source)["sample"]
+            first = {"source": "mirror", "ref": "1" * 40, "version": "v1", "updatedAt": None}
+            target = installer.install_skill(
+                source, item, destination, 100, 1_000_000, provenance=first
+            )
+            self.assertEqual((target / "version.txt").read_bytes(), b"one")
+            self.assertFalse((target / installer.INSTALL_METADATA_DIR).exists())
+            (skill / "version.txt").write_bytes(b"two")
+            write_catalog(source, skill)
+            item = installer.load_catalog(source)["sample"]
+            second = {"source": "mirror", "ref": "2" * 40, "version": "v2", "updatedAt": None}
+            installer.install_skill(
+                source, item, destination, 100, 1_000_000,
+                replace=True, provenance=second
+            )
+            self.assertEqual((target / "version.txt").read_bytes(), b"two")
+            metadata = installer.load_install_metadata(destination, "sample")
+            self.assertEqual(metadata["ref"], "2" * 40)
+            self.assertEqual(metadata["digest"], item["sha256"])
+
+    def test_update_rolls_back_when_metadata_commit_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            destination = base / "installed"
+            skill = write_skill(source, extra={"version.txt": b"stable"})
+            write_catalog(source, skill)
+            old_item = installer.load_catalog(source)["sample"]
+            provenance = {"source": "mirror", "ref": "1" * 40, "version": "v1", "updatedAt": None}
+            target = installer.install_skill(
+                source, old_item, destination, 100, 1_000_000, provenance=provenance
+            )
+            old_metadata = installer.load_install_metadata(destination, "sample")
+            (skill / "version.txt").write_bytes(b"broken")
+            write_catalog(source, skill)
+            new_item = installer.load_catalog(source)["sample"]
+            real_replace = installer.os.replace
+
+            def fail_metadata(source_path, destination_path):
+                if str(source_path).endswith(".tmp"):
+                    raise OSError("simulated metadata failure")
+                return real_replace(source_path, destination_path)
+
+            with mock.patch.object(installer.os, "replace", side_effect=fail_metadata):
+                with self.assertRaisesRegex(OSError, "simulated"):
+                    installer.install_skill(
+                        source, new_item, destination, 100, 1_000_000,
+                        replace=True,
+                        provenance={"source": "mirror", "ref": "2" * 40, "version": "v2", "updatedAt": None},
+                    )
+            self.assertEqual((target / "version.txt").read_bytes(), b"stable")
+            self.assertEqual(installer.load_install_metadata(destination, "sample"), old_metadata)
+
+    def test_update_rolls_back_on_keyboard_interrupt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            destination = base / "installed"
+            skill = write_skill(source, extra={"version.txt": b"stable"})
+            write_catalog(source, skill)
+            old_item = installer.load_catalog(source)["sample"]
+            first = {"source": "mirror", "ref": "1" * 40, "version": "v1", "updatedAt": None}
+            target = installer.install_skill(
+                source, old_item, destination, 100, 1_000_000, provenance=first
+            )
+            old_metadata = installer.load_install_metadata(destination, "sample")
+            (skill / "version.txt").write_bytes(b"interrupted")
+            write_catalog(source, skill)
+            new_item = installer.load_catalog(source)["sample"]
+            real_replace = installer.os.replace
+
+            def interrupt_metadata(source_path, destination_path):
+                if str(source_path).endswith(".tmp"):
+                    real_replace(source_path, destination_path)
+                    raise KeyboardInterrupt()
+                return real_replace(source_path, destination_path)
+
+            with mock.patch.object(installer.os, "replace", side_effect=interrupt_metadata):
+                with self.assertRaises(KeyboardInterrupt):
+                    installer.install_skill(
+                        source, new_item, destination, 100, 1_000_000,
+                        replace=True,
+                        provenance={"source": "mirror", "ref": "2" * 40, "version": "v2", "updatedAt": None},
+                    )
+            self.assertEqual((target / "version.txt").read_bytes(), b"stable")
+            self.assertEqual(installer.load_install_metadata(destination, "sample"), old_metadata)
+
+    def test_release_publisher_skips_stale_sequence_and_allows_audited_rollback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            content = base / "content"
+            content.mkdir()
+            subprocess.run(["git", "init", "--quiet"], cwd=content, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=content, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=content, check=True)
+            skill = write_skill(content)
+            write_catalog(content, skill)
+            subprocess.run(["git", "add", "."], cwd=content, check=True)
+            subprocess.run(["git", "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "v1"], cwd=content, check=True)
+            v1 = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=content, text=True).strip()
+            (skill / "new.txt").write_text("v2", encoding="utf-8")
+            write_catalog(content, skill)
+            subprocess.run(["git", "add", "."], cwd=content, check=True)
+            subprocess.run(["git", "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "v2"], cwd=content, check=True)
+            v2 = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=content, text=True).strip()
+            mirror = base / "skills.git"
+            subprocess.run(["git", "clone", "--quiet", "--mirror", str(content), str(mirror)], check=True)
+            common = {
+                "source": "https://gitlab.example/ai/skills.git",
+                "push_url_env": "TEST_PUSH_URL",
+                "updated_at": "2026-08-25T01:02:03Z",
+                "git_name": "Test",
+                "git_email": "test@example.invalid",
+            }
+            with mock.patch.dict(os.environ, {"TEST_PUSH_URL": str(mirror)}):
+                promote.publish(types.SimpleNamespace(
+                    **common, ref=v2, version="approved-20", sequence=20, rollback=False
+                ))
+                first_pointer = subprocess.check_output(
+                    ["git", "--git-dir", str(mirror), "rev-parse", "latest-approved"], text=True
+                ).strip()
+                promote.publish(types.SimpleNamespace(
+                    **common, ref=v1, version="approved-19", sequence=19, rollback=False
+                ))
+                self.assertEqual(
+                    subprocess.check_output(
+                        ["git", "--git-dir", str(mirror), "rev-parse", "latest-approved"], text=True
+                    ).strip(),
+                    first_pointer,
+                )
+                promote.publish(types.SimpleNamespace(
+                    **common, ref=v1, version="rollback-21", sequence=21, rollback=True
+                ))
+            release = installer.fetch_approved_release(str(mirror))
+            self.assertEqual(release.ref, v1)
+            self.assertEqual(release.version, "rollback-21")
 
 
 class RepositoryTests(unittest.TestCase):
