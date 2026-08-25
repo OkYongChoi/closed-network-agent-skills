@@ -297,12 +297,12 @@ still need only read access to the repository and never call the GitLab API.
 ## Verified release snapshot
 
 - Public repository: <https://github.com/OkYongChoi/skills>
-- Verified implementation commit: `ce0f3e4ebbcdd12da6611d4f5ffd0c8f374cab2c`
+- Verified implementation commit: `2ced961c06804cbe4424f09d0d9bc9e80a424fd4`
 - `skills-creator` source: `openai/skills@4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc`
 - `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
 - Agent Skills specification snapshot: `69ef37e9424c0a7ea9dd2293b559e43ec8176379`
 
-On 2026-08-24, catalog validation, all 42 tests, and an offline
+On 2026-08-25, catalog validation, all 56 tests, and an offline
 `core.autocrlf=true` clean-clone check passed. The corresponding
 [GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32706959494)
 passed on Ubuntu and Windows with Python 3.11 and 3.13, including native Windows
