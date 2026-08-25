@@ -34,7 +34,7 @@ import portable_paths
 CANONICAL_SOURCE = "https://github.com/OkYongChoi/skills.git"
 # Reviewed cross-platform release commit. A repository catalog ref is preferred when
 # this script is run from a checkout containing a newer approved catalog.
-CANONICAL_REF: str | None = "2ced961c06804cbe4424f09d0d9bc9e80a424fd4"
+CANONICAL_REF: str | None = "99c315e5dee947f650e565e86962cd43a43c130d"
 FULL_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ALLOWED_FIELDS = {"name", "description", "license", "compatibility"}
