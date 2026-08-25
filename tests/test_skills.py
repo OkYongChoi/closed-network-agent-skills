@@ -282,6 +282,21 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(fallback.source, installer.CANONICAL_SOURCE)
             self.assertEqual(fallback.ref, "a" * 40)
 
+    def test_explicit_canonical_source_without_ref_follows_approved_pointer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            config = installer.resolve_effective_config(
+                self.config_args(source=installer.CANONICAL_SOURCE),
+                environ={},
+                checkout=None,
+                user_config_path=base / "missing-user.json",
+                system_config_path=base / "missing-system.json",
+            )
+            self.assertEqual(config.source, installer.CANONICAL_SOURCE)
+            self.assertIsNone(config.ref)
+            self.assertEqual(config.origins["source"], "cli")
+            self.assertEqual(config.origins["ref"], "unset")
+
     def test_mutable_ref_requires_explicit_effective_opt_in(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -1064,6 +1079,11 @@ class InstallerTests(unittest.TestCase):
             subprocess.run(["git", "add", "."], cwd=content, check=True)
             subprocess.run(["git", "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "v1"], cwd=content, check=True)
             v1 = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=content, text=True).strip()
+            (skill / "unapproved.txt").write_text("not released", encoding="utf-8")
+            write_catalog(content, skill)
+            subprocess.run(["git", "add", "."], cwd=content, check=True)
+            subprocess.run(["git", "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "unapproved"], cwd=content, check=True)
+            unapproved = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=content, text=True).strip()
             (skill / "new.txt").write_text("v2", encoding="utf-8")
             write_catalog(content, skill)
             subprocess.run(["git", "add", "."], cwd=content, check=True)
@@ -1080,6 +1100,10 @@ class InstallerTests(unittest.TestCase):
             }
             with mock.patch.dict(os.environ, {"TEST_PUSH_URL": str(mirror)}):
                 promote.publish(types.SimpleNamespace(
+                    **{**common, "source": "https://github.example/ai/skills.git"},
+                    ref=v1, version="approved-10", sequence=10, rollback=False,
+                ))
+                promote.publish(types.SimpleNamespace(
                     **common, ref=v2, version="approved-20", sequence=20, rollback=False
                 ))
                 first_pointer = subprocess.check_output(
@@ -1094,15 +1118,32 @@ class InstallerTests(unittest.TestCase):
                     ).strip(),
                     first_pointer,
                 )
+                with self.assertRaisesRegex(promote.PromoteError, "approval history"):
+                    promote.publish(types.SimpleNamespace(
+                        **common, ref=unapproved, version="rollback-21", sequence=21,
+                        rollback=True,
+                    ))
                 promote.publish(types.SimpleNamespace(
-                    **common, ref=v1, version="rollback-21", sequence=21, rollback=True
+                    **common, ref=v1, version="rollback-5", sequence=5, rollback=True
+                ))
+                promote.publish(types.SimpleNamespace(
+                    **common, ref=v2, version="approved-20-retry", sequence=20,
+                    rollback=False,
                 ))
             release = installer.fetch_approved_release(str(mirror))
             self.assertEqual(release.ref, v1)
-            self.assertEqual(release.version, "rollback-21")
+            self.assertEqual(release.version, "rollback-5")
+            self.assertEqual(release.sequence, 21)
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_gitlab_auto_publish_is_limited_to_default_branch_pushes(self):
+        pipeline = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"',
+            pipeline,
+        )
+
     def test_nul_delimited_git_attribute_parser(self):
         parsed = platform_verify.parse_check_attr_z(
             b"skills/sample/SKILL.md\0text\0set\0"

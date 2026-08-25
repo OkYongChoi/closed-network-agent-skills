@@ -23,7 +23,7 @@
       "name": "skills-installer",
       "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
       "path": "skills/skills-installer",
-      "sha256": "3223c35d65b82347bb3da13f006edc75774d4953698d80d9b887cc588408c87b"
+      "sha256": "9afb57a575c4855372de87dc9dd484b7a81d5fd6a5c9f5359b70f93d83e7610d"
     }
   ]
 }

@@ -265,32 +265,38 @@ its default PowerShell (`pwsh`). Adjust only the runner tags if your internal
 GitLab uses different labels. Each runner needs Python 3.11+ and Git on `PATH`;
 no package download, container image, or external Python dependency is used.
 
-After both verification jobs pass on the default branch,
+After both verification jobs pass on a protected default-branch push pipeline,
 `publish:latest-approved` runs `scripts/promote_release.py`. It serializes
 promotion with the `latest-approved` resource group and appends a manifest-only
 commit to that branch. Configure GitLab as follows:
 
 1. Protect `latest-approved`; allow pushes only from the role used by approved
    default-branch pipelines, and prevent ordinary contributors from pushing it.
-2. In **Settings > CI/CD > Job token permissions**, enable **Allow Git push
+2. Protect the default branch as well: disable direct pushes while retaining
+   merge permission for the authorized Merge Request reviewers. This makes a
+   default-branch `push` pipeline an MR merge result rather than an ad-hoc push.
+3. In **Settings > CI/CD > Job token permissions**, enable **Allow Git push
    requests to the repository**. This is off by default. A same-project job-token
    push does not create another pipeline, avoiding a release loop.
-3. Ensure the user whose merge triggered the pipeline has the protected-branch
+4. Ensure the user whose merge triggered the pipeline has the protected-branch
    push role. The job token has that triggering user's permissions.
-4. Keep `${CI_PROJECT_URL}.git` credential-free as the manifest source. The
+5. Keep `${CI_PROJECT_URL}.git` credential-free as the manifest source. The
    authenticated `CI_REPOSITORY_URL` is read from the named environment variable,
    is not placed in the command line, and is never written to the manifest.
 
-The pipeline IID is recorded as a monotonic sequence. Although `resource_group`
+Scheduled, web, API, and manual pipelines do not automatically publish a
+release. The pipeline IID is recorded as a monotonic sequence. Although `resource_group`
 serializes pushes, GitLab does not guarantee its default queue order; an older
 pipeline therefore skips promotion if a greater or equal sequence is already
-published. Manual rollback explicitly bypasses that stale-pipeline check and
-records a new rollback version and pointer commit.
+published. Manual rollback receives a sequence greater than the current pointer,
+even when the rollback job came from an older pipeline, so queued or retried
+pipelines cannot undo it.
 
 To roll back, run the manual `rollback:latest-approved` job on the default branch
 with `ROLLBACK_REF` set to an earlier reviewed full SHA. The job publishes a new
-pointer commit, preserving an auditable history; users receive it on their next
-`update`. If your GitLab does not permit job-token pushes, provide an equivalent
+pointer commit only when that SHA appears in the existing approval history,
+preserving an auditable history; users receive it on their next `update`. If your
+GitLab does not permit job-token pushes, provide an equivalent
 masked protected push URL to the script through CI configuration. Runtime clients
 still need only read access to the repository and never call the GitLab API.
 
@@ -302,7 +308,7 @@ still need only read access to the repository and never call the GitLab API.
 - `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
 - Agent Skills specification snapshot: `69ef37e9424c0a7ea9dd2293b559e43ec8176379`
 
-On 2026-08-25, catalog validation, all 56 tests, and an offline
+On 2026-08-25, catalog validation, all 58 tests, and an offline
 `core.autocrlf=true` clean-clone check passed. The corresponding
 [GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32803068481)
 passed on Ubuntu and Windows with Python 3.11 and 3.13, including native Windows

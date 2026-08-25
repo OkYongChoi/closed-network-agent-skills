@@ -274,7 +274,7 @@ def resolve_effective_config(
         )
 
     ref_value = choose("ref", getattr(args, "ref", None), "AGENT_SKILLS_REF")
-    if ref_value is None and source == CANONICAL_SOURCE:
+    if ref_value is None and origins.get("source") == "embedded-fallback":
         selected_checkout = (
             _checkout_root() if checkout is AUTO_CHECKOUT else checkout
         )

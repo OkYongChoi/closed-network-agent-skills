@@ -16,6 +16,8 @@ from urllib.parse import urlsplit
 
 FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_APPROVAL_HISTORY = 10_000
 
 
 class PromoteError(RuntimeError):
@@ -111,6 +113,48 @@ def manifest(
     return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def release_at(root: Path, commit: str) -> dict[str, object]:
+    """Read and minimally validate one manifest from the approval history."""
+    try:
+        size = int(git(["cat-file", "-s", f"{commit}:release-manifest.json"], root))
+    except ValueError as exc:
+        raise PromoteError("release manifest has an invalid Git object size") from exc
+    if size > MAX_MANIFEST_BYTES:
+        raise PromoteError(f"release manifest exceeds {MAX_MANIFEST_BYTES} bytes")
+    try:
+        raw = json.loads(git_bytes(["show", f"{commit}:release-manifest.json"], root))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise PromoteError(f"invalid release manifest in approval history: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise PromoteError("release manifest in approval history must be an object")
+    return raw
+
+
+def approved_payload_refs(root: Path, pointer: str) -> set[str]:
+    """Return immutable payload refs recorded by the protected pointer history."""
+    commits = git(
+        ["rev-list", f"--max-count={MAX_APPROVAL_HISTORY + 1}", pointer], root
+    ).splitlines()
+    if len(commits) > MAX_APPROVAL_HISTORY:
+        raise PromoteError(
+            f"approval history exceeds the {MAX_APPROVAL_HISTORY}-commit safety limit"
+        )
+    approved: set[str] = set()
+    for commit in commits:
+        release = release_at(root, commit)
+        ref = release.get("ref")
+        if (
+            release.get("formatVersion") != 1
+            or release.get("kind") != "agent-skills-release"
+            or release.get("name") != "skills"
+            or not isinstance(ref, str)
+            or not FULL_SHA.fullmatch(ref)
+        ):
+            raise PromoteError("invalid release manifest identity in approval history")
+        approved.add(ref.lower())
+    return approved
+
+
 def publish(args: argparse.Namespace) -> None:
     push_url = os.environ.get(args.push_url_env)
     if not push_url:
@@ -132,20 +176,29 @@ def publish(args: argparse.Namespace) -> None:
             raise PromoteError("fetched release commit does not match requested ref")
         catalog_bytes = git_bytes(["show", f"{resolved}:catalog.json"], root)
         pointer_fetch = subprocess.run(
-            ["git", "fetch", "--quiet", "--depth=1", "origin", "refs/heads/latest-approved"],
+            ["git", "fetch", "--quiet", "origin", "refs/heads/latest-approved"],
             cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120,
             env={**os.environ, **remote_env},
         )
+        effective_sequence = args.sequence
         if pointer_fetch.returncode == 0:
             pointer = git(["rev-parse", "FETCH_HEAD^{commit}"], root)
-            if not args.rollback:
-                try:
-                    previous = json.loads(
-                        git_bytes(["show", f"{pointer}:release-manifest.json"], root)
+            previous = release_at(root, pointer)
+            previous_sequence = previous.get("sequence")
+            if (
+                not isinstance(previous_sequence, int)
+                or isinstance(previous_sequence, bool)
+                or previous_sequence < 0
+            ):
+                raise PromoteError("latest approval sequence is invalid")
+            if args.rollback:
+                approved = approved_payload_refs(root, pointer)
+                if resolved.lower() not in approved:
+                    raise PromoteError(
+                        "rollback ref was not published in the approval history"
                     )
-                    previous_sequence = previous.get("sequence", -1)
-                except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
-                    previous_sequence = -1
+                effective_sequence = max(args.sequence, previous_sequence + 1)
+            else:
                 if isinstance(previous_sequence, int) and previous_sequence >= args.sequence:
                     print(
                         f"skipped stale promotion sequence {args.sequence}; "
@@ -154,12 +207,14 @@ def publish(args: argparse.Namespace) -> None:
                     return
             git(["checkout", "--quiet", "--detach", pointer], root)
         else:
+            if args.rollback:
+                raise PromoteError("cannot roll back before an approved release exists")
             git(["checkout", "--quiet", "--orphan", "latest-approved"], root)
         output = root / "release-manifest.json"
         output.write_bytes(
             manifest(
                 catalog_bytes, args.source, resolved, args.version, args.updated_at,
-                args.sequence,
+                effective_sequence,
             )
         )
         git(["add", "release-manifest.json"], root)
