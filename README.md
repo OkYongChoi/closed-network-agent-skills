@@ -215,7 +215,7 @@ no package download, container image, or external Python dependency is used.
 ## Verified release snapshot
 
 - Public repository: <https://github.com/OkYongChoi/skills>
-- Verified implementation commit: `827f91f431ee65f563821d3edc953017376bb778`
+- Verified implementation commit: `ce0f3e4ebbcdd12da6611d4f5ffd0c8f374cab2c`
 - `skills-creator` source: `openai/skills@4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc`
 - `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
 - Agent Skills specification snapshot: `69ef37e9424c0a7ea9dd2293b559e43ec8176379`
