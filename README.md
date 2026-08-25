@@ -310,7 +310,7 @@ still need only read access to the repository and never call the GitLab API.
 
 On 2026-08-25, catalog validation, all 58 tests, and an offline
 `core.autocrlf=true` clean-clone check passed. The corresponding
-[GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32803068481)
+[GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32809451046)
 passed on Ubuntu and Windows with Python 3.11 and 3.13, including native Windows
 hard-link, junction, and process-handle checks. A pinned `repo-summary` install
 matched its catalogued tree and required no GitHub or GitLab API. Internal
