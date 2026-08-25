@@ -385,7 +385,7 @@ still need only read access to the repository and never call the GitLab API.
 ## Verified release snapshot
 
 - Public repository: <https://github.com/OkYongChoi/closed-network-agent-skills>
-- Verified implementation commit: `99c315e5dee947f650e565e86962cd43a43c130d`
+- Verified implementation commit: `a8257ac34b9f9ca9af2658abbefe5068f24f4060`
 - `skills-creator` source: `openai/skills@4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc`
 - `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
 - Agent Skills specification snapshot: `69ef37e9424c0a7ea9dd2293b559e43ec8176379`
