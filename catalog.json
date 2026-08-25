@@ -2,7 +2,7 @@
   "format_version": 1,
   "digest_algorithm": "portable-tree-sha256-v2",
   "repository": {
-    "url": "https://github.com/OkYongChoi/skills.git",
+    "url": "https://github.com/OkYongChoi/closed-network-agent-skills.git",
     "ref": "99c315e5dee947f650e565e86962cd43a43c130d",
     "ref_status": "pinned-cross-platform-release"
   },
@@ -23,7 +23,7 @@
       "name": "skills-installer",
       "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
       "path": "skills/skills-installer",
-      "sha256": "cc245bccff9ed8de987b77327adeb4c19f02849a530fd917a6b2a0a8d9448869"
+      "sha256": "1066096efe0732af778465e106ab550fdc8a438c7fde777f9b30554bf12ba2e2"
     }
   ]
 }

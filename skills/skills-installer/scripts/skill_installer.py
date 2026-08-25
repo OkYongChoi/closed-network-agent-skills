@@ -31,7 +31,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import portable_paths
 
-CANONICAL_SOURCE = "https://github.com/OkYongChoi/skills.git"
+CANONICAL_SOURCE = "https://github.com/OkYongChoi/closed-network-agent-skills.git"
 # Reviewed cross-platform release commit. A repository catalog ref is preferred when
 # this script is run from a checkout containing a newer approved catalog.
 CANONICAL_REF: str | None = "99c315e5dee947f650e565e86962cd43a43c130d"

@@ -19,6 +19,88 @@ claim to parse arbitrary YAML, `metadata`, or `allowed-tools`. Generated skills 
 compatible with the Agent Skills specification; use a full YAML implementation if
 you need the entire specification surface.
 
+## Get and use this repository
+
+Clone the connected-side source, validate it, and install only the skill you
+need. Installation from the checkout is fully local:
+
+```bash
+git clone https://github.com/OkYongChoi/closed-network-agent-skills.git
+cd closed-network-agent-skills
+python3 -B scripts/verify_platform.py --autocrlf-clone
+python3 -B skills/skills-installer/scripts/skill_installer.py list
+python3 -B skills/skills-installer/scripts/skill_installer.py install repo-summary
+```
+
+On Windows PowerShell:
+
+```powershell
+git clone https://github.com/OkYongChoi/closed-network-agent-skills.git
+Set-Location closed-network-agent-skills
+python -B scripts/verify_platform.py --autocrlf-clone
+python -B skills/skills-installer/scripts/skill_installer.py install repo-summary
+```
+
+The default install root is `~/.agents/skills` on Linux/macOS and
+`%USERPROFILE%\.agents\skills` on Windows. Use `--agent-home` or `--dest` to
+relocate it. For a closed network, follow the mirror/bootstrap procedure below
+and configure the internal GitLab URL rather than the public GitHub URL.
+
+### Bring both repositories into an internal GitLab
+
+On the connected transfer host, mirror both public repositories and push the
+approved bundles to the closed-network GitLab:
+
+```bash
+git clone --mirror https://github.com/OkYongChoi/closed-network-agent-skills.git
+git clone --mirror https://github.com/OkYongChoi/closed-network-agent-plugins.git
+git --git-dir closed-network-agent-skills.git push --mirror \
+  https://gitlab.company.local/ai/closed-network-agent-skills.git
+git --git-dir closed-network-agent-plugins.git push --mirror \
+  https://gitlab.company.local/ai/closed-network-agent-plugins.git
+```
+
+Deploy the following source-only JSON as `/etc/agent-tools/config.json` on
+Linux, or `%ProgramData%\AgentTools\config.json` on Windows. Omitting `ref`
+makes both installers follow the immutable commit recorded by
+`latest-approved`:
+
+```json
+{
+  "skills": {
+    "source": "https://gitlab.company.local/ai/closed-network-agent-skills.git",
+    "allowMutableRef": false
+  },
+  "plugins": {
+    "source": "https://gitlab.company.local/ai/closed-network-agent-plugins.git",
+    "allowMutableRef": false,
+    "defaultTarget": "portable"
+  },
+  "agentHome": "~/.agents"
+}
+```
+
+After the one-time installer bootstrap, ordinary users invoke the installed
+installer and only choose package names. On Linux/macOS:
+
+```bash
+python3 -B ~/.agents/skills/skills-installer/scripts/skill_installer.py list
+python3 -B ~/.agents/skills/skills-installer/scripts/skill_installer.py install repo-summary
+python3 -B ~/.agents/skills/skills-installer/scripts/skill_installer.py update repo-summary
+```
+
+On Windows PowerShell:
+
+```powershell
+$installer = "$env:USERPROFILE\.agents\skills\skills-installer\scripts\skill_installer.py"
+python -B $installer list
+python -B $installer install repo-summary
+python -B $installer update repo-summary
+```
+
+The companion Plugins repository documents its portable, Codex, and Claude
+installation commands.
+
 ## Local use
 
 ```bash
@@ -57,7 +139,7 @@ accepted only when `--allow-mutable-ref` is explicitly supplied for development:
 
 ```bash
 python3 skills/skills-installer/scripts/skill_installer.py install repo-summary \
-  --source https://github.example.com/agents/skills.git \
+  --source https://github.example.com/agents/closed-network-agent-skills.git \
   --ref 0123456789abcdef0123456789abcdef01234567
 ```
 
@@ -75,12 +157,12 @@ Administrators can centrally deploy one shared JSON file for both installers:
 ```json
 {
   "skills": {
-    "source": "https://gitlab.company.local/ai/skills.git",
+    "source": "https://gitlab.company.local/ai/closed-network-agent-skills.git",
     "ref": "0123456789abcdef0123456789abcdef01234567",
     "allowMutableRef": false
   },
   "plugins": {
-    "source": "https://gitlab.company.local/ai/plugins.git",
+    "source": "https://gitlab.company.local/ai/closed-network-agent-plugins.git",
     "ref": "abcdef0123456789abcdef0123456789abcdef01",
     "allowMutableRef": false,
     "defaultTarget": "portable"
@@ -145,7 +227,7 @@ A typical centrally deployed config is therefore:
 ```json
 {
   "skills": {
-    "source": "https://gitlab.company.local/ai/skills.git",
+    "source": "https://gitlab.company.local/ai/closed-network-agent-skills.git",
     "allowMutableRef": false
   },
   "agentHome": "~/.agents"
@@ -166,17 +248,17 @@ development source for backward compatibility.
 On a connected transfer host, mirror the repository and record the approved commit:
 
 ```bash
-git clone --mirror https://github.com/OkYongChoi/skills.git skills.git
-git --git-dir skills.git rev-parse refs/heads/main
+git clone --mirror https://github.com/OkYongChoi/closed-network-agent-skills.git closed-network-agent-skills.git
+git --git-dir closed-network-agent-skills.git rev-parse refs/heads/main
 ```
 
-Move `skills.git` through the approved transfer process and publish it to the
+Move `closed-network-agent-skills.git` through the approved transfer process and publish it to the
 internal Git service. Administrators should expose only reviewed commits. On the
 closed network:
 
 ```bash
-git clone https://git.corp.example/agents/skills.git
-cd skills
+git clone https://git.corp.example/agents/closed-network-agent-skills.git
+cd closed-network-agent-skills
 git checkout --detach APPROVED_FULL_COMMIT_SHA
 python3 skills/skills-installer/scripts/skill_installer.py install skills-installer \
   --source . --dest "${AGENT_HOME:-$HOME/.agents}/skills"
@@ -192,13 +274,13 @@ supported without a ref when it contains `refs/heads/latest-approved`.
 PowerShell bootstrap against an internal GitLab mirror:
 
 ```powershell
-git clone --mirror https://github.com/OkYongChoi/skills.git skills.git
-git --git-dir skills.git rev-parse refs/heads/main
-# Transfer skills.git through the approved process, then push it to GitLab.
-git --git-dir skills.git push --mirror https://gitlab.corp.example/agents/skills.git
+git clone --mirror https://github.com/OkYongChoi/closed-network-agent-skills.git closed-network-agent-skills.git
+git --git-dir closed-network-agent-skills.git rev-parse refs/heads/main
+# Transfer the mirror through the approved process, then push it to GitLab.
+git --git-dir closed-network-agent-skills.git push --mirror https://gitlab.corp.example/agents/closed-network-agent-skills.git
 
-git clone https://gitlab.corp.example/agents/skills.git
-Set-Location skills
+git clone https://gitlab.corp.example/agents/closed-network-agent-skills.git
+Set-Location closed-network-agent-skills
 git checkout --detach $env:APPROVED_SKILLS_COMMIT
 python -B skills/skills-installer/scripts/skill_installer.py install skills-installer `
   --source . --agent-home "$env:USERPROFILE/.agents"
@@ -302,7 +384,7 @@ still need only read access to the repository and never call the GitLab API.
 
 ## Verified release snapshot
 
-- Public repository: <https://github.com/OkYongChoi/skills>
+- Public repository: <https://github.com/OkYongChoi/closed-network-agent-skills>
 - Verified implementation commit: `99c315e5dee947f650e565e86962cd43a43c130d`
 - `skills-creator` source: `openai/skills@4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc`
 - `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
@@ -310,7 +392,7 @@ still need only read access to the repository and never call the GitLab API.
 
 On 2026-08-25, catalog validation, all 58 tests, and an offline
 `core.autocrlf=true` clean-clone check passed. The corresponding
-[GitHub Actions run](https://github.com/OkYongChoi/skills/actions/runs/32809451046)
+[GitHub Actions run](https://github.com/OkYongChoi/closed-network-agent-skills/actions/runs/32809451046)
 passed on Ubuntu and Windows with Python 3.11 and 3.13, including native Windows
 hard-link, junction, and process-handle checks. A pinned `repo-summary` install
 matched its catalogued tree and required no GitHub or GitLab API. Internal
