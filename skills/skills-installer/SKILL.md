@@ -9,13 +9,22 @@ compatibility: "Requires Python 3.11+ and Git; remote sources require access to 
 
 Use `scripts/skill_installer.py list` to inspect the selected catalog and
 `scripts/skill_installer.py install NAME` to install one skill. The default target
-is `${AGENT_HOME:-~/.agents}/skills`; `--dest` or `--agent-home` can override it.
+is `~/.agents/skills`; `--dest` or `--agent-home` can override it.
 
-Source precedence is `--source`, `AGENT_SKILLS_SOURCE`, this repository checkout,
-then the canonical repository. Local sources need no ref. Remote ref precedence is
-`--ref`, `AGENT_SKILLS_REF`, then the canonical catalog/embedded ref. Remote refs
-must be full commit SHAs; accept a branch or tag only when the user explicitly
-requests development behavior and passes `--allow-mutable-ref`.
+Settings resolve per field in this order: CLI; `AGENT_SKILLS_SOURCE` or
+`AGENT_SKILLS_REF`; user `~/.agents/config.json`; system
+`/etc/agent-tools/config.json` (Windows:
+`%ProgramData%\AgentTools\config.json`); current checkout; embedded canonical
+fallback. The shared strict-JSON config uses `skills.source`, `skills.ref`,
+`skills.allowMutableRef`, and top-level `agentHome`. Local or bundled sources need
+no ref. Remote refs must be full commit SHAs; accept a branch or tag only when
+effective config explicitly enables `allowMutableRef` or the user requests
+development behavior and passes `--allow-mutable-ref`.
+
+Use `scripts/skill_installer.py effective-config` to inspect resolved values and
+per-field provenance without accessing the selected source. The command redacts
+URL credentials, query strings, and fragments. Never ask ordinary users to copy
+an approved SHA when their administrator has deployed central config.
 
 The installer rejects existing targets, links, hard-linked files, special files,
 Windows junctions/reparse points, Win32-reserved or non-NFC names,

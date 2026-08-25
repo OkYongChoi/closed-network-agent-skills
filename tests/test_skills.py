@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -12,7 +13,7 @@ import tempfile
 import time
 import types
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -166,38 +167,262 @@ class CreatorTests(unittest.TestCase):
 
 
 class InstallerTests(unittest.TestCase):
-    def test_source_precedence(self):
-        with environment(AGENT_SKILLS_SOURCE="/environment/source"):
-            self.assertEqual(installer.select_source("/cli/source"), "/cli/source")
-            self.assertEqual(installer.select_source(None), "/environment/source")
-        with environment(AGENT_SKILLS_SOURCE=None):
-            self.assertEqual(Path(installer.select_source(None)), ROOT)
+    @staticmethod
+    def config_args(**overrides):
+        values = {
+            "source": None,
+            "ref": None,
+            "allow_mutable_ref": None,
+            "agent_home": None,
+        }
+        values.update(overrides)
+        return types.SimpleNamespace(**values)
 
-    def test_ref_precedence_and_catalog_canonical_ref(self):
-        catalog_ref = "1" * 40
+    def test_config_paths_are_platform_specific_and_injectable(self):
+        user, system = installer.config_paths(
+            environ={}, os_name="posix", home=Path("/home/tester")
+        )
+        self.assertEqual(user, Path("/home/tester/.agents/config.json"))
+        self.assertEqual(system, Path("/etc/agent-tools/config.json"))
+        user, system = installer.config_paths(
+            environ={"USERPROFILE": "D:/Users/tester", "ProgramData": "D:/ProgramData"},
+            os_name="nt",
+            home=Path("unused"),
+        )
+        self.assertEqual(user, Path("D:/Users/tester/.agents/config.json"))
+        self.assertEqual(system, Path("D:/ProgramData/AgentTools/config.json"))
+
+    def test_effective_config_precedence_is_per_field(self):
         with tempfile.TemporaryDirectory() as temp:
-            checkout = Path(temp)
-            (checkout / "catalog.json").write_text(
-                json.dumps({"repository": {"ref": catalog_ref}}), encoding="utf-8"
+            base = Path(temp)
+            user_path = base / "user.json"
+            system_path = base / "system.json"
+            user_path.write_text(
+                json.dumps(
+                    {
+                        "skills": {"source": "https://user/skills.git"},
+                        "agentHome": "~/managed-agents",
+                    }
+                ),
+                encoding="utf-8",
             )
-            with mock.patch.object(installer, "_checkout_root", return_value=checkout):
-                with environment(AGENT_SKILLS_REF=None):
-                    self.assertEqual(
-                        installer.select_ref(None, installer.CANONICAL_SOURCE), catalog_ref
-                    )
-                with environment(AGENT_SKILLS_REF="2" * 40):
-                    self.assertEqual(
-                        installer.select_ref(None, installer.CANONICAL_SOURCE), "2" * 40
-                    )
-                self.assertEqual(
-                    installer.select_ref("3" * 40, installer.CANONICAL_SOURCE), "3" * 40
+            system_path.write_text(
+                json.dumps(
+                    {
+                        "skills": {
+                            "source": "https://system/skills.git",
+                            "ref": "1" * 40,
+                            "allowMutableRef": False,
+                        },
+                        "agentHome": "/system/agents",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = installer.resolve_effective_config(
+                self.config_args(source="https://cli/skills.git"),
+                environ={"AGENT_SKILLS_REF": "2" * 40},
+                home=base / "profile",
+                checkout=None,
+                user_config_path=user_path,
+                system_config_path=system_path,
+            )
+            self.assertEqual(config.source, "https://cli/skills.git")
+            self.assertEqual(config.ref, "2" * 40)
+            self.assertFalse(config.allow_mutable_ref)
+            self.assertEqual(config.agent_home, base / "profile" / "managed-agents")
+            self.assertEqual(config.origins["source"], "cli")
+            self.assertEqual(config.origins["ref"], "env:AGENT_SKILLS_REF")
+            self.assertTrue(config.origins["allowMutableRef"].startswith("system-config:"))
+            self.assertTrue(config.origins["agentHome"].startswith("user-config:"))
+
+    def test_environment_source_beats_user_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            user_path = base / "user.json"
+            system_path = base / "missing-system.json"
+            user_path.write_text(
+                json.dumps({"skills": {"source": "https://user/repo.git", "ref": "1" * 40}}),
+                encoding="utf-8",
+            )
+            config = installer.resolve_effective_config(
+                self.config_args(),
+                environ={"AGENT_SKILLS_SOURCE": "https://env/repo.git"},
+                checkout=None,
+                user_config_path=user_path,
+                system_config_path=system_path,
+            )
+            self.assertEqual(config.source, "https://env/repo.git")
+            self.assertEqual(config.ref, "1" * 40)
+
+    def test_current_checkout_and_embedded_fallback_need_no_user_ref(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            missing_user = base / "user.json"
+            missing_system = base / "system.json"
+            local = installer.resolve_effective_config(
+                self.config_args(),
+                environ={},
+                checkout=ROOT,
+                user_config_path=missing_user,
+                system_config_path=missing_system,
+            )
+            self.assertEqual(local.source, str(ROOT))
+            self.assertIsNone(local.ref)
+            with mock.patch.object(installer, "CANONICAL_REF", "a" * 40):
+                fallback = installer.resolve_effective_config(
+                    self.config_args(),
+                    environ={},
+                    checkout=None,
+                    user_config_path=missing_user,
+                    system_config_path=missing_system,
                 )
-            with mock.patch.object(installer, "_checkout_root", return_value=None), mock.patch.object(
-                installer, "CANONICAL_REF", "4" * 40
-            ), environment(AGENT_SKILLS_REF=None):
-                self.assertEqual(
-                    installer.select_ref(None, installer.CANONICAL_SOURCE), "4" * 40
+            self.assertEqual(fallback.source, installer.CANONICAL_SOURCE)
+            self.assertEqual(fallback.ref, "a" * 40)
+
+    def test_mutable_ref_requires_explicit_effective_opt_in(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            user_path = base / "user.json"
+            system_path = base / "system.json"
+            user_path.write_text(
+                json.dumps({"skills": {"source": "https://git/repo.git", "ref": "main"}}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(installer.InstallError, "full 40-character"):
+                installer.resolve_effective_config(
+                    self.config_args(),
+                    environ={},
+                    checkout=None,
+                    user_config_path=user_path,
+                    system_config_path=system_path,
                 )
+            user_path.write_text(
+                json.dumps(
+                    {
+                        "skills": {
+                            "source": "https://git/repo.git",
+                            "ref": "main",
+                            "allowMutableRef": True,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = installer.resolve_effective_config(
+                self.config_args(),
+                environ={},
+                checkout=None,
+                user_config_path=user_path,
+                system_config_path=system_path,
+            )
+            self.assertTrue(config.allow_mutable_ref)
+            self.assertEqual(config.ref, "main")
+
+    def test_mutable_ref_preserves_case_sensitive_branch_name(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            user_path = base / "user.json"
+            system_path = base / "system.json"
+            user_path.write_text(
+                json.dumps(
+                    {
+                        "skills": {
+                            "source": "https://git/repo.git",
+                            "ref": "Release/Candidate-A",
+                            "allowMutableRef": True,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = installer.resolve_effective_config(
+                self.config_args(),
+                environ={},
+                checkout=None,
+                user_config_path=user_path,
+                system_config_path=system_path,
+            )
+            self.assertEqual(config.ref, "Release/Candidate-A")
+
+    def test_present_invalid_config_fails_even_when_cli_overrides(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            user_path = base / "user.json"
+            system_path = base / "system.json"
+            for text, expected in (
+                ('{"skills": {}, "skills": {}}', "duplicate key"),
+                ('{"unknown": true}', "unknown top-level"),
+                ('{"skills": {"allowMutableRef": "false"}}', "must be a boolean"),
+                ('{"plugins": {"defaultTarget": "unknown"}}', "defaultTarget"),
+            ):
+                with self.subTest(text=text):
+                    user_path.write_text(text, encoding="utf-8")
+                    with self.assertRaisesRegex(installer.InstallError, expected):
+                        installer.resolve_effective_config(
+                            self.config_args(source=str(ROOT)),
+                            environ={},
+                            checkout=ROOT,
+                            user_config_path=user_path,
+                            system_config_path=system_path,
+                        )
+
+    def test_config_rejects_link_and_accepts_shared_plugins_section(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            real = base / "real.json"
+            real.write_text(
+                json.dumps(
+                    {
+                        "skills": {"source": str(ROOT)},
+                        "plugins": {"defaultTarget": "portable"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loaded = installer.load_config(real)
+            self.assertIsNotNone(loaded)
+            link = base / "link.json"
+            try:
+                link.symlink_to(real)
+            except (OSError, NotImplementedError):
+                self.skipTest("symbolic links unavailable")
+            with self.assertRaisesRegex(installer.InstallError, "regular, singly linked"):
+                installer.load_config(link)
+
+    def test_effective_config_redacts_url_credentials(self):
+        self.assertEqual(
+            installer._redact_source(
+                "https://user:token@git.example:8443/skills.git?access_token=secret#x"
+            ),
+            "https://***@git.example:8443/skills.git",
+        )
+
+    def test_install_command_uses_central_config_without_source_or_ref_flags(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            skill = write_skill(source)
+            write_catalog(source, skill)
+            user_path = base / "profile" / ".agents" / "config.json"
+            user_path.parent.mkdir(parents=True)
+            user_path.write_text(
+                json.dumps(
+                    {
+                        "skills": {"source": str(source)},
+                        "agentHome": str(base / "managed-home"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            system_path = base / "system.json"
+            with mock.patch.object(
+                installer, "config_paths", return_value=(user_path, system_path)
+            ), redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.main(["install", "sample"]), 0)
+            self.assertTrue(
+                (base / "managed-home" / "skills" / "sample" / "SKILL.md").is_file()
+            )
 
     def test_remote_requires_full_sha(self):
         with self.assertRaises(installer.InstallError):

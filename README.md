@@ -61,10 +61,54 @@ python3 skills/skills-installer/scripts/skill_installer.py install repo-summary 
   --ref 0123456789abcdef0123456789abcdef01234567
 ```
 
-Source selection is deterministic: `--source`, then `AGENT_SKILLS_SOURCE`, then
-the current repository checkout, then `https://github.com/OkYongChoi/skills.git`.
-Ref selection is `--ref`, then `AGENT_SKILLS_REF`, then the canonical
-`catalog.json` `repository.ref`/embedded `CANONICAL_REF`.
+Source, ref, and agent-home selection is deterministic and resolved per field:
+CLI, environment (`AGENT_SKILLS_SOURCE`/`AGENT_SKILLS_REF`), user JSON config,
+system JSON config, the current checkout, then the embedded canonical fallback.
+The config locations are `~/.agents/config.json` and
+`/etc/agent-tools/config.json` on Linux/macOS, or
+`%USERPROFILE%\.agents\config.json` and
+`%ProgramData%\AgentTools\config.json` on Windows. A local or bundled checkout
+does not need a ref.
+
+Administrators can centrally deploy one shared JSON file for both installers:
+
+```json
+{
+  "skills": {
+    "source": "https://gitlab.company.local/ai/skills.git",
+    "ref": "0123456789abcdef0123456789abcdef01234567",
+    "allowMutableRef": false
+  },
+  "plugins": {
+    "source": "https://gitlab.company.local/ai/plugins.git",
+    "ref": "abcdef0123456789abcdef0123456789abcdef01",
+    "allowMutableRef": false,
+    "defaultTarget": "portable"
+  },
+  "agentHome": "~/.agents"
+}
+```
+
+Only JSON is supported. Unknown fields, duplicate keys, wrong types, malformed
+JSON, linked config files, and oversized config files fail closed even if a CLI
+argument would otherwise override them. Values are merged per field, so a user
+source may combine with a system ref; administrators should normally deploy the
+approved source and ref together. Mutable refs remain disabled unless
+`allowMutableRef` is explicitly `true` in effective config or the development-only
+`--allow-mutable-ref` flag is passed.
+
+Inspect the resolved values and their provenance without contacting Git:
+
+```bash
+python3 skills/skills-installer/scripts/skill_installer.py effective-config
+```
+
+URL userinfo, query strings, and fragments are removed from this diagnostic.
+After central configuration, ordinary users only need:
+
+```bash
+python3 skills/skills-installer/scripts/skill_installer.py install repo-summary
+```
 
 ## Closed-network mirror and bootstrap
 
@@ -87,9 +131,10 @@ python3 skills/skills-installer/scripts/skill_installer.py install skills-instal
   --source . --dest "${AGENT_HOME:-$HOME/.agents}/skills"
 ```
 
-After bootstrap, set `AGENT_SKILLS_SOURCE` to the internal Git URL and
-`AGENT_SKILLS_REF` to the approved full SHA. Local filesystem mirrors are also
-supported and do not need a ref.
+After bootstrap, deploy the approved internal Git URL and full SHA in the system
+config. Environment variables remain useful for ephemeral CI overrides; ordinary
+users do not need to export a ref. Local filesystem mirrors are also supported
+and do not need a ref.
 
 PowerShell bootstrap against an internal GitLab mirror:
 
@@ -104,8 +149,8 @@ Set-Location skills
 git checkout --detach $env:APPROVED_SKILLS_COMMIT
 python -B skills/skills-installer/scripts/skill_installer.py install skills-installer `
   --source . --agent-home "$env:USERPROFILE/.agents"
-$env:AGENT_SKILLS_SOURCE = "https://gitlab.corp.example/agents/skills.git"
-$env:AGENT_SKILLS_REF = $env:APPROVED_SKILLS_COMMIT
+# Administrators then deploy %ProgramData%\AgentTools\config.json with the
+# approved GitLab source and full commit SHA.
 ```
 
 For a bare mirror already imported into GitLab, update it on the connected side
