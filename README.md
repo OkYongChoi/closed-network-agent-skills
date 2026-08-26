@@ -73,8 +73,7 @@ makes both installers follow the immutable commit recorded by
   },
   "plugins": {
     "source": "https://gitlab.company.local/ai/air-gapped-agent-plugins.git",
-    "allowMutableRef": false,
-    "defaultTarget": "portable"
+    "allowMutableRef": false
   },
   "agentHome": "~/.agents"
 }
@@ -98,8 +97,7 @@ python -B $installer install repo-summary
 python -B $installer update repo-summary
 ```
 
-The companion Plugins repository documents its portable, Codex, and Claude
-installation commands.
+The companion Plugins repository documents plugin installation commands.
 
 ## Local use
 
@@ -164,8 +162,7 @@ Administrators can centrally deploy one shared JSON file for both installers:
   "plugins": {
     "source": "https://gitlab.company.local/ai/air-gapped-agent-plugins.git",
     "ref": "abcdef0123456789abcdef0123456789abcdef01",
-    "allowMutableRef": false,
-    "defaultTarget": "portable"
+    "allowMutableRef": false
   },
   "agentHome": "~/.agents"
 }

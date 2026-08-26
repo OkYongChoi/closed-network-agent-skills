@@ -371,7 +371,6 @@ class InstallerTests(unittest.TestCase):
                 ('{"skills": {}, "skills": {}}', "duplicate key"),
                 ('{"unknown": true}', "unknown top-level"),
                 ('{"skills": {"allowMutableRef": "false"}}', "must be a boolean"),
-                ('{"plugins": {"defaultTarget": "unknown"}}', "defaultTarget"),
             ):
                 with self.subTest(text=text):
                     user_path.write_text(text, encoding="utf-8")
@@ -392,7 +391,7 @@ class InstallerTests(unittest.TestCase):
                 json.dumps(
                     {
                         "skills": {"source": str(ROOT)},
-                        "plugins": {"defaultTarget": "portable"},
+                        "plugins": {},
                     }
                 ),
                 encoding="utf-8",

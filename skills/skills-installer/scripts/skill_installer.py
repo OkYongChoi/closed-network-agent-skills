@@ -56,7 +56,7 @@ RELEASE_MANIFEST_PATH = "release-manifest.json"
 INSTALL_METADATA_DIR = ".agent-install-metadata"
 CONFIG_TOP_LEVEL_FIELDS = {"skills", "plugins", "agentHome"}
 SKILLS_CONFIG_FIELDS = {"source", "ref", "allowMutableRef"}
-PLUGINS_CONFIG_FIELDS = {"source", "ref", "allowMutableRef", "defaultTarget"}
+PLUGINS_CONFIG_FIELDS = {"source", "ref", "allowMutableRef"}
 AUTO_CHECKOUT = object()
 
 
@@ -115,14 +115,6 @@ def _validate_config_section(
             _nonempty_string(raw[field], field=f"{name}.{field}", path=path)
     if "allowMutableRef" in raw and not isinstance(raw["allowMutableRef"], bool):
         raise InstallError(f"{path}: {name}.allowMutableRef must be a boolean")
-    if "defaultTarget" in raw:
-        target = _nonempty_string(
-            raw["defaultTarget"], field=f"{name}.defaultTarget", path=path
-        )
-        if target not in {"portable", "codex", "claude"}:
-            raise InstallError(
-                f"{path}: {name}.defaultTarget must be portable, codex, or claude"
-            )
     return raw
 
 
