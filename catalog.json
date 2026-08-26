@@ -2,7 +2,7 @@
   "format_version": 1,
   "digest_algorithm": "portable-tree-sha256-v2",
   "repository": {
-    "url": "https://github.com/OkYongChoi/closed-network-agent-skills.git",
+    "url": "https://github.com/OkYongChoi/air-gapped-agent-skills.git",
     "ref": "a8257ac34b9f9ca9af2658abbefe5068f24f4060",
     "ref_status": "pinned-cross-platform-release"
   },
