@@ -6,7 +6,7 @@ required. Generated values are JSON double-quoted. Unquoted input is accepted on
 for the conservative token form `[A-Za-z][A-Za-z0-9._/-]*`; YAML reserved words
 such as `true`, `null`, `yes`, and `off` are rejected.
 
-All skill tree components must be portable to Windows and Linux. Use NFC Unicode,
+All skill tree components must be portable to Linux, macOS, and Windows. Use NFC Unicode,
 avoid Windows device names and reserved characters, keep each component at or
 below 255 UTF-16 code units and the skill-relative path at or below 240. Names
 that collide after NFC normalization and Unicode case folding are rejected.

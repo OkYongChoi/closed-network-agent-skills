@@ -20,6 +20,15 @@ verify:windows:
   script:
     - python -B scripts/verify_platform.py --autocrlf-clone
 
+verify:macos:
+  stage: verify
+  tags:
+    - macos
+  when: manual
+  allow_failure: true
+  script:
+    - python3 -B scripts/verify_platform.py --autocrlf-clone
+
 publish:latest-approved:
   stage: release
   tags:

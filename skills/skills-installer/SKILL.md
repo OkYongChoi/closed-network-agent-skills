@@ -14,7 +14,7 @@ The default target is `~/.agents/skills`; `--dest` or `--agent-home` can overrid
 
 Settings resolve per field in this order: CLI; `AGENT_SKILLS_SOURCE` or
 `AGENT_SKILLS_REF`; user `~/.agents/config.json`; system
-`/etc/agent-tools/config.json` (Windows:
+`/etc/agent-tools/config.json` on Linux/macOS (Windows:
 `%ProgramData%\AgentTools\config.json`); current checkout; embedded canonical
 fallback. The shared strict-JSON config uses `skills.source`, `skills.ref`,
 `skills.allowMutableRef`, and top-level `agentHome`. Local or bundled sources need
