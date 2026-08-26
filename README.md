@@ -125,6 +125,42 @@ python3 skills/skills-creator/scripts/skill_tool.py create-skill incident-brief 
   --output ./skills --description "Summarize an incident. Use during incident handoff."
 ```
 
+## Contribute a new skill
+
+Create new work on a topic branch; do not push directly to the protected
+`main` branch:
+
+```bash
+git switch -c feat/add-incident-brief
+python3 -B skills/skills-creator/scripts/skill_tool.py create-skill incident-brief \
+  --output ./skills --description "Summarize an incident. Use during incident handoff."
+```
+
+Complete the generated files, then validate the skill and refresh the catalog.
+Do not calculate or edit the digest by hand:
+
+```bash
+python3 -B skills/skills-creator/scripts/skill_tool.py validate skills/incident-brief
+python3 -B scripts/refresh_catalog.py
+python3 -B scripts/refresh_catalog.py --check
+python3 -B -m unittest discover -s tests -v
+git diff --check
+```
+
+Review the new `skills/incident-brief` tree and the generated `catalog.json`
+entry, then include both in the same commit and pull request:
+
+```bash
+git add skills/incident-brief catalog.json
+git commit -m "feat: add incident-brief skill"
+git push -u origin feat/add-incident-brief
+```
+
+Open a pull request into `main` and merge it only after the required review and
+CI checks pass. For an existing skill change, skip the creation command and run
+the same validation and catalog-refresh steps before committing. On Windows,
+use `python` instead of `python3`.
+
 Install from this checkout (the default while running the checked-in installer):
 
 ```bash
