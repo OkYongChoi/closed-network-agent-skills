@@ -25,8 +25,8 @@ Clone the connected-side source, validate it, and install only the skill you
 need. Installation from the checkout is fully local:
 
 ```bash
-git clone https://github.com/OkYongChoi/closed-network-agent-skills.git
-cd closed-network-agent-skills
+git clone https://github.com/OkYongChoi/air-gapped-agent-skills.git
+cd air-gapped-agent-skills
 python3 -B scripts/verify_platform.py --autocrlf-clone
 python3 -B skills/skills-installer/scripts/skill_installer.py list
 python3 -B skills/skills-installer/scripts/skill_installer.py install repo-summary
@@ -35,8 +35,8 @@ python3 -B skills/skills-installer/scripts/skill_installer.py install repo-summa
 On Windows PowerShell:
 
 ```powershell
-git clone https://github.com/OkYongChoi/closed-network-agent-skills.git
-Set-Location closed-network-agent-skills
+git clone https://github.com/OkYongChoi/air-gapped-agent-skills.git
+Set-Location air-gapped-agent-skills
 python -B scripts/verify_platform.py --autocrlf-clone
 python -B skills/skills-installer/scripts/skill_installer.py install repo-summary
 ```
@@ -52,12 +52,12 @@ On the connected transfer host, mirror both public repositories and push the
 approved bundles to the closed-network GitLab:
 
 ```bash
-git clone --mirror https://github.com/OkYongChoi/closed-network-agent-skills.git
-git clone --mirror https://github.com/OkYongChoi/closed-network-agent-plugins.git
-git --git-dir closed-network-agent-skills.git push --mirror \
-  https://gitlab.company.local/ai/closed-network-agent-skills.git
-git --git-dir closed-network-agent-plugins.git push --mirror \
-  https://gitlab.company.local/ai/closed-network-agent-plugins.git
+git clone --mirror https://github.com/OkYongChoi/air-gapped-agent-skills.git
+git clone --mirror https://github.com/OkYongChoi/air-gapped-agent-plugins.git
+git --git-dir air-gapped-agent-skills.git push --mirror \
+  https://gitlab.company.local/ai/air-gapped-agent-skills.git
+git --git-dir air-gapped-agent-plugins.git push --mirror \
+  https://gitlab.company.local/ai/air-gapped-agent-plugins.git
 ```
 
 Deploy the following source-only JSON as `/etc/agent-tools/config.json` on
@@ -68,11 +68,11 @@ makes both installers follow the immutable commit recorded by
 ```json
 {
   "skills": {
-    "source": "https://gitlab.company.local/ai/closed-network-agent-skills.git",
+    "source": "https://gitlab.company.local/ai/air-gapped-agent-skills.git",
     "allowMutableRef": false
   },
   "plugins": {
-    "source": "https://gitlab.company.local/ai/closed-network-agent-plugins.git",
+    "source": "https://gitlab.company.local/ai/air-gapped-agent-plugins.git",
     "allowMutableRef": false,
     "defaultTarget": "portable"
   },
@@ -139,7 +139,7 @@ accepted only when `--allow-mutable-ref` is explicitly supplied for development:
 
 ```bash
 python3 skills/skills-installer/scripts/skill_installer.py install repo-summary \
-  --source https://github.example.com/agents/closed-network-agent-skills.git \
+  --source https://github.example.com/agents/air-gapped-agent-skills.git \
   --ref 0123456789abcdef0123456789abcdef01234567
 ```
 
@@ -157,12 +157,12 @@ Administrators can centrally deploy one shared JSON file for both installers:
 ```json
 {
   "skills": {
-    "source": "https://gitlab.company.local/ai/closed-network-agent-skills.git",
+    "source": "https://gitlab.company.local/ai/air-gapped-agent-skills.git",
     "ref": "0123456789abcdef0123456789abcdef01234567",
     "allowMutableRef": false
   },
   "plugins": {
-    "source": "https://gitlab.company.local/ai/closed-network-agent-plugins.git",
+    "source": "https://gitlab.company.local/ai/air-gapped-agent-plugins.git",
     "ref": "abcdef0123456789abcdef0123456789abcdef01",
     "allowMutableRef": false,
     "defaultTarget": "portable"
@@ -227,7 +227,7 @@ A typical centrally deployed config is therefore:
 ```json
 {
   "skills": {
-    "source": "https://gitlab.company.local/ai/closed-network-agent-skills.git",
+    "source": "https://gitlab.company.local/ai/air-gapped-agent-skills.git",
     "allowMutableRef": false
   },
   "agentHome": "~/.agents"
@@ -248,17 +248,17 @@ development source for backward compatibility.
 On a connected transfer host, mirror the repository and record the approved commit:
 
 ```bash
-git clone --mirror https://github.com/OkYongChoi/closed-network-agent-skills.git closed-network-agent-skills.git
-git --git-dir closed-network-agent-skills.git rev-parse refs/heads/main
+git clone --mirror https://github.com/OkYongChoi/air-gapped-agent-skills.git air-gapped-agent-skills.git
+git --git-dir air-gapped-agent-skills.git rev-parse refs/heads/main
 ```
 
-Move `closed-network-agent-skills.git` through the approved transfer process and publish it to the
+Move `air-gapped-agent-skills.git` through the approved transfer process and publish it to the
 internal Git service. Administrators should expose only reviewed commits. On the
 closed network:
 
 ```bash
-git clone https://git.corp.example/agents/closed-network-agent-skills.git
-cd closed-network-agent-skills
+git clone https://git.corp.example/agents/air-gapped-agent-skills.git
+cd air-gapped-agent-skills
 git checkout --detach APPROVED_FULL_COMMIT_SHA
 python3 skills/skills-installer/scripts/skill_installer.py install skills-installer \
   --source . --dest "${AGENT_HOME:-$HOME/.agents}/skills"
@@ -274,13 +274,13 @@ supported without a ref when it contains `refs/heads/latest-approved`.
 PowerShell bootstrap against an internal GitLab mirror:
 
 ```powershell
-git clone --mirror https://github.com/OkYongChoi/closed-network-agent-skills.git closed-network-agent-skills.git
-git --git-dir closed-network-agent-skills.git rev-parse refs/heads/main
+git clone --mirror https://github.com/OkYongChoi/air-gapped-agent-skills.git air-gapped-agent-skills.git
+git --git-dir air-gapped-agent-skills.git rev-parse refs/heads/main
 # Transfer the mirror through the approved process, then push it to GitLab.
-git --git-dir closed-network-agent-skills.git push --mirror https://gitlab.corp.example/agents/closed-network-agent-skills.git
+git --git-dir air-gapped-agent-skills.git push --mirror https://gitlab.corp.example/agents/air-gapped-agent-skills.git
 
-git clone https://gitlab.corp.example/agents/closed-network-agent-skills.git
-Set-Location closed-network-agent-skills
+git clone https://gitlab.corp.example/agents/air-gapped-agent-skills.git
+Set-Location air-gapped-agent-skills
 git checkout --detach $env:APPROVED_SKILLS_COMMIT
 python -B skills/skills-installer/scripts/skill_installer.py install skills-installer `
   --source . --agent-home "$env:USERPROFILE/.agents"
@@ -424,7 +424,7 @@ still need only read access to the repository and never call the GitLab API.
 
 ## Verified release snapshot
 
-- Public repository: <https://github.com/OkYongChoi/closed-network-agent-skills>
+- Public repository: <https://github.com/OkYongChoi/air-gapped-agent-skills>
 - Verified implementation commit: `a8257ac34b9f9ca9af2658abbefe5068f24f4060`
 - `skills-creator` source: `openai/skills@4ab6e0fd99c6667163bc34173e3ed3a3fed75ebc`
 - `skills-installer` source: `openai/skills@49f948faa9258a0c61caceaf225e179651397431`
@@ -432,7 +432,7 @@ still need only read access to the repository and never call the GitLab API.
 
 On 2026-08-25, catalog validation, all 58 tests, and an offline
 `core.autocrlf=true` clean-clone check passed. The corresponding
-[GitHub Actions run](https://github.com/OkYongChoi/closed-network-agent-skills/actions/runs/32809451046)
+[GitHub Actions run](https://github.com/OkYongChoi/air-gapped-agent-skills/actions/runs/32809451046)
 passed on Ubuntu and Windows with Python 3.11 and 3.13, including native Windows
 hard-link, junction, and process-handle checks. A pinned `repo-summary` install
 matched its catalogued tree and required no GitHub or GitLab API. Internal
