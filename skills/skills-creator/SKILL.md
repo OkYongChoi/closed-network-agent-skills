@@ -19,8 +19,8 @@ skill needs that directory.
 Run `scripts/skill_tool.py validate PATH` after editing. The validator implements
 the repository's restricted stdlib-only frontmatter profile, documented in
 `references/authoring-profile.md`; it is not an arbitrary YAML validator.
-It also rejects paths that cannot be represented consistently on Linux and
-Windows, including reserved device names, alternate-data-stream colons, trailing
+It also rejects paths that cannot be represented consistently on Linux, macOS,
+and Windows, including reserved device names, alternate-data-stream colons, trailing
 dots/spaces, non-NFC names, normalization/case collisions, overlong paths,
 symlinks, junctions/reparse points, and special files.
 Hard-linked files are also rejected so one external inode cannot appear under

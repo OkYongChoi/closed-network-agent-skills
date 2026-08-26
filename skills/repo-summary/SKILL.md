@@ -10,7 +10,7 @@ compatibility: "Requires Python 3.11+; Git metadata is optional and network acce
 Run `scripts/repo_summary.py PATH` to produce a bounded Markdown overview, or add
 `--format json` for structured output. The script reads filesystem metadata and a
 small set of project manifests, and invokes only local Git commands.
-It recognizes common Linux and Windows entry points, including POSIX and batch
+It recognizes common POSIX (Linux/macOS) and Windows entry points, including POSIX and batch
 Gradle wrappers, PowerShell/batch scripts, and .NET solution/project or
 `Directory.Build.*` files. Candidate commands are suggestions only.
 

@@ -10,7 +10,7 @@ Every skill is a directory whose basename equals the `name` field and which has 
 `SKILL.md`. Optional `scripts/`, `references/`, and `assets/` directories may be
 present. Other ordinary files are allowed by the installer.
 
-Paths use `/` in the catalog and must be portable across Linux and Windows.
+Paths use `/` in the catalog and must be portable across Linux, macOS, and Windows.
 Components must be NFC-normalized, avoid Win32 reserved device names and
 characters, and remain within the documented UTF-16 limits. The validator also
 rejects normalization/casefold collisions, links, junctions/reparse points,

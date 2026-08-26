@@ -11,19 +11,19 @@
       "name": "repo-summary",
       "description": "Summarize a local source repository's structure, likely build and test commands, Git state, and review risks. Use for offline repository orientation or engineering handoff.",
       "path": "skills/repo-summary",
-      "sha256": "0aa11077a524d6b0d79459cd58364cb2cdfda2990c702109a00ef846c54b5e9c"
+      "sha256": "288c863bf8cd36a8025632a81875cc8697c27c4691052a24c949f47f71c76ac9"
     },
     {
       "name": "skills-creator",
       "description": "Create and validate portable Agent Skills with a dependency-free restricted authoring profile. Use when scaffolding a skill for mirrored or closed-network distribution.",
       "path": "skills/skills-creator",
-      "sha256": "a8948f9dd4ef8bd8c84cc44478ac79b085d76f4cca0cff246cdd46e568656c23"
+      "sha256": "00f98a52032e5f8b2c30260fd9fa08f2f491b5393735f6ac63f07a8d0d4e6c15"
     },
     {
       "name": "skills-installer",
       "description": "List and securely install catalogued Agent Skills from local checkouts or Git remotes. Use for closed-network bootstrap, internal mirrors, or checksum-verified skill installation.",
       "path": "skills/skills-installer",
-      "sha256": "c8fd4c8a7c8898cd35ed164ef7f34a20e4f0af6af7f35a7acb70ea8097c12b4c"
+      "sha256": "da0a011298c01f3e9f41d10c46342e0f82b6d46fbfeace0dea004ab0ee231b67"
     }
   ]
 }

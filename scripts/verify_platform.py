@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run dependency-free Linux/Windows and line-ending acceptance checks."""
+"""Run dependency-free macOS/Linux/Windows and line-ending acceptance checks."""
 
 from __future__ import annotations
 

@@ -61,7 +61,7 @@ git --git-dir closed-network-agent-plugins.git push --mirror \
 ```
 
 Deploy the following source-only JSON as `/etc/agent-tools/config.json` on
-Linux, or `%ProgramData%\AgentTools\config.json` on Windows. Omitting `ref`
+Linux/macOS, or `%ProgramData%\AgentTools\config.json` on Windows. Omitting `ref`
 makes both installers follow the immutable commit recorded by
 `latest-approved`:
 
@@ -360,7 +360,7 @@ regular file created on the same host and its recorded process no longer exists.
 Malformed, foreign-host, live-process, linked, and recently modified locks fail
 closed. Tune the one-hour default with `--stale-lock-seconds`.
 
-## Linux, Windows, and GitLab verification
+## macOS, Linux, Windows, and GitLab verification
 
 The portable profile rejects Win32 device names (`CON`, `NUL`, `COM1`, and
 related names), reserved characters and alternate-data-stream colons, trailing
@@ -381,11 +381,13 @@ The command builds a temporary Git snapshot, clones it with
 `core.autocrlf=true` and `core.eol=crlf`, then reruns unit tests, catalog digest
 verification, and Git attribute checks without network access.
 
-`.gitlab-ci.yml` defines separate `verify:linux` and `verify:windows` jobs for
-shell runners tagged `linux` and `windows`; the Windows shell executor may use
-its default PowerShell (`pwsh`). Adjust only the runner tags if your internal
-GitLab uses different labels. Each runner needs Python 3.11+ and Git on `PATH`;
-no package download, container image, or external Python dependency is used.
+GitHub Actions validates Ubuntu, macOS, and Windows. `.gitlab-ci.yml` defines
+required `verify:linux` and `verify:windows` jobs for shell runners tagged
+`linux` and `windows`, plus an optional manual `verify:macos` job for a runner
+tagged `macos`; the Windows shell executor may use its default PowerShell
+(`pwsh`). Rename the tags to match your internal runner inventory. Each runner
+needs Python 3.11+ and Git on `PATH`; no package download, container image, or
+external Python dependency is used.
 
 After both verification jobs pass on a protected default-branch push pipeline,
 `publish:latest-approved` runs `scripts/promote_release.py`. It serializes
@@ -434,10 +436,10 @@ On 2026-08-25, catalog validation, all 58 tests, and an offline
 `core.autocrlf=true` clean-clone check passed. The corresponding
 [GitHub Actions run](https://github.com/OkYongChoi/closed-network-agent-skills/actions/runs/32809451046)
 passed on Ubuntu and Windows with Python 3.11 and 3.13, including native Windows
-hard-link, junction, and process-handle checks. A pinned `repo-summary` install
-matched its catalogued tree and required no GitHub or GitLab API. Internal
-GitLab runner execution remains an environment-specific acceptance step after
-mirror import.
+hard-link, junction, and process-handle checks. The same offline suite also
+passes on macOS. A pinned `repo-summary` install matched its catalogued tree and
+required no GitHub or GitLab API. Internal GitLab runner execution remains an
+environment-specific acceptance step after mirror import.
 
 ## Provenance and license
 
